@@ -110,15 +110,15 @@ src/
 
 ### Login Screen
 
-![Login Screen](./src/assets/hero.png)
+![Login Screen](./src/assets/image.png)
 
 ### Patient - AI Checker
 
-![Patient AI Checker](./src/assets/image.png)
+![Patient AI Checker](./src/assets/image2.png)
 
 ### Patient - Appointment Booking
 
-![Patient Appointment Booking](./src/assets/image2.png)
+![Patient Appointment Booking](./src/assets/image3.png)
 
 ## Notes
 
