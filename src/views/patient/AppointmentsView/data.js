@@ -1,0 +1,58 @@
+export const UPCOMING_APPOINTMENTS = [
+  {
+    id: 'appt-1',
+    doctor: 'Dr. Sarah Chen',
+    specialty: 'General Practice',
+    month: 'MAR',
+    day: 19,
+    time: '10:00 AM',
+    clinic: 'Hanoi Central Clinic',
+    status: 'Confirmed',
+    cancelText: 'Dr. Sarah Chen · Mar 19 · 10:00 AM',
+  },
+  {
+    id: 'appt-2',
+    doctor: 'Dr. Marcus Reid',
+    specialty: 'General Practice',
+    month: 'MAR',
+    day: 26,
+    time: '2:30 PM',
+    clinic: 'Hanoi Central Clinic',
+    status: 'Confirmed',
+    cancelText: 'Dr. Marcus Reid · Mar 26 · 2:30 PM',
+  },
+  {
+    id: 'appt-3',
+    doctor: 'Dr. Linh Nguyen',
+    specialty: 'Neurology',
+    month: 'APR',
+    day: 3,
+    time: '9:30 AM',
+    clinic: 'Hoan Kiem Medical Center',
+    status: 'Pending',
+    cancelText: 'Dr. Linh Nguyen · Apr 3 · 9:30 AM',
+  },
+]
+
+export const PAST_APPOINTMENTS = [
+  {
+    id: 'past-1',
+    doctor: 'Dr. Sarah Chen',
+    specialty: 'General Practice',
+    month: 'FEB',
+    day: 28,
+    time: '10:00 AM',
+    clinic: 'Hanoi Central Clinic',
+    status: 'Completed',
+  },
+  {
+    id: 'past-2',
+    doctor: 'Dr. Linh Nguyen',
+    specialty: 'Neurology',
+    month: 'JAN',
+    day: 15,
+    time: '9:00 AM',
+    clinic: 'Hoan Kiem Medical Center',
+    status: 'Completed',
+  },
+]
