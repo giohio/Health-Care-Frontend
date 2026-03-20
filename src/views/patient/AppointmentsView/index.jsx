@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
 import { UPCOMING_APPOINTMENTS, PAST_APPOINTMENTS } from './data'
 import UpcomingCard from './UpcomingCard'
@@ -11,7 +11,7 @@ const TABS = [
   { key: 'past', label: 'Past' },
 ]
 
-export default function AppointmentsView({ setCurrentView, setSelectedAppointment }) {
+export default function AppointmentsView({ setCurrentView, setSelectedAppointment, bookings }) {
   const [activeTab, setActiveTab] = useState('upcoming')
   const [upcoming, setUpcoming] = useState(UPCOMING_APPOINTMENTS)
   const [toast, setToast] = useState(null)
@@ -25,6 +25,25 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
     setUpcoming((prev) => prev.filter((a) => a.id !== id))
     setToast(`Appointment with ${doctorName} has been cancelled.`)
   }
+
+  const bookingAppointments = useMemo(() => (
+    bookings
+      .filter((booking) => booking.status === 'pending' || booking.status === 'confirmed')
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .map((booking) => ({
+        id: booking.id,
+        doctor: booking.doctorName,
+        specialty: booking.specialtyLabel,
+        month: 'MAR',
+        day: Number(booking.dateLabel.replace('March ', '')),
+        time: booking.timeLabel,
+        clinic: booking.clinic,
+        status: booking.status === 'pending' ? 'Pending' : 'Confirmed',
+        cancelText: `${booking.doctorName} · ${booking.dateLabel} · ${booking.timeLabel}`,
+      }))
+  ), [bookings])
+
+  const allUpcoming = useMemo(() => ([...bookingAppointments, ...upcoming]), [bookingAppointments, upcoming])
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -48,7 +67,7 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
 
       {activeTab === 'upcoming' && (
         <div role="tabpanel" aria-labelledby="tab-upcoming">
-          {upcoming.length === 0 ? (
+          {allUpcoming.length === 0 ? (
             <div className="py-16 text-center">
               <div className="mx-auto mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-slate-100 text-slate-400 dark:bg-[#1c1c25] dark:text-[#606070]">
                 <IconCalendar size={20} />
@@ -64,7 +83,7 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
             </div>
           ) : (
             <div className="space-y-3">
-              {upcoming.map((appt) => (
+              {allUpcoming.map((appt) => (
                 <UpcomingCard
                   key={appt.id}
                   appt={appt}
@@ -91,6 +110,20 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
 }
 
 AppointmentsView.propTypes = {
+  bookings: PropTypes.arrayOf(PropTypes.shape({
+    clinic: PropTypes.string,
+    createdAt: PropTypes.number,
+    dateLabel: PropTypes.string,
+    doctorName: PropTypes.string,
+    id: PropTypes.string,
+    specialtyLabel: PropTypes.string,
+    status: PropTypes.string,
+    timeLabel: PropTypes.string,
+  })),
   setCurrentView: PropTypes.func.isRequired,
   setSelectedAppointment: PropTypes.func.isRequired,
+}
+
+AppointmentsView.defaultProps = {
+  bookings: [],
 }

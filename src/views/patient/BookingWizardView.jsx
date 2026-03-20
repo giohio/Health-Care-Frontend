@@ -40,27 +40,27 @@ const TIME_SLOTS = [
   { key: '3:00PM', label: '3:00 PM', unavailable: false },
 ]
 
-const SUMMARY_ROWS = [
-  { label: 'Doctor', value: 'Dr. Sarah Chen' },
-  { label: 'Specialty', value: 'General Practice' },
-  { label: 'Date', value: 'Wednesday, March 19' },
-  { label: 'Time', value: '10:00 AM' },
-  { label: 'Clinic', value: 'Hanoi Central Clinic' },
-]
-
 function Stepper({ step }) {
   return (
     <div className="mb-8 mt-6 flex items-center">
       {STEPS.map((s, i) => {
         const active = s.n === step
         const done = s.n < step
+        let circleClass = 'bg-slate-200 text-slate-400 dark:bg-[#252530] dark:text-[#505060]'
+        if (done) circleClass = 'bg-slate-900 text-white dark:bg-[#eeeef5] dark:text-[#0c0c13]'
+        if (active) circleClass = 'bg-indigo-600 text-white'
+
+        let labelClass = 'text-slate-400 dark:text-[#505060]'
+        if (done) labelClass = 'text-slate-900 dark:text-[#eeeef5]'
+        if (active) labelClass = 'text-indigo-600 dark:text-indigo-400'
+
         return (
           <div key={s.n} className="flex flex-1 items-center">
             <div className="flex items-center gap-2">
-              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${active ? 'bg-indigo-600 text-white' : done ? 'bg-slate-900 text-white dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'bg-slate-200 text-slate-400 dark:bg-[#252530] dark:text-[#505060]'}`}>
+              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${circleClass}`}>
                 {done ? '✓' : s.n}
               </span>
-              <span className={`text-xs font-medium ${active ? 'text-indigo-600 dark:text-indigo-400' : done ? 'text-slate-900 dark:text-[#eeeef5]' : 'text-slate-400 dark:text-[#505060]'}`}>{s.label}</span>
+              <span className={`text-xs font-medium ${labelClass}`}>{s.label}</span>
             </div>
             {i < STEPS.length - 1 && <div className="mx-3 h-px flex-1 bg-slate-200 dark:bg-[#252530]" />}
           </div>
@@ -72,12 +72,25 @@ function Stepper({ step }) {
 
 Stepper.propTypes = { step: PropTypes.number.isRequired }
 
-export default function BookingWizardView({ setCurrentView }) {
+export default function BookingWizardView({ setCurrentView, onSubmitBooking }) {
   const [step, setStep] = useState(1)
   const [specialty, setSpecialty] = useState('general')
   const [doctor, setDoctor] = useState('sc')
   const [day, setDay] = useState('wed')
   const [time, setTime] = useState('10:00AM')
+
+  const selectedSpecialty = SPECIALTIES.find((item) => item.id === specialty) || SPECIALTIES[0]
+  const selectedDoctor = DOCTORS.find((item) => item.id === doctor) || DOCTORS[0]
+  const selectedDay = DAYS.find((item) => item.key === day) || DAYS[0]
+  const selectedTime = TIME_SLOTS.find((item) => item.key === time) || TIME_SLOTS[0]
+
+  const summaryRows = [
+    { label: 'Doctor', value: selectedDoctor.name },
+    { label: 'Specialty', value: selectedSpecialty.label },
+    { label: 'Date', value: `${selectedDay.label}, March ${selectedDay.date}` },
+    { label: 'Time', value: selectedTime.label },
+    { label: 'Clinic', value: 'Hanoi Central Clinic' },
+  ]
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -159,11 +172,17 @@ export default function BookingWizardView({ setCurrentView }) {
           <div className="grid grid-cols-4 gap-2">
             {TIME_SLOTS.map((t) => {
               const selected = time === t.key
+              let buttonClass = 'border-slate-200 bg-white text-slate-600 dark:border-[#252530] dark:bg-[#111118] dark:text-[#c8c8e0]'
+              if (selected) buttonClass = 'border-indigo-600 bg-indigo-600 text-white'
+              if (t.unavailable) {
+                buttonClass = 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300 line-through dark:border-[#1c1c25] dark:bg-[#16161e] dark:text-[#404050]'
+              }
+
               return (
                 <button
                   key={t.key}
                   disabled={t.unavailable}
-                  className={`card-hover rounded-xl border px-2 py-2 text-sm ${t.unavailable ? 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300 line-through dark:border-[#1c1c25] dark:bg-[#16161e] dark:text-[#404050]' : selected ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600 dark:border-[#252530] dark:bg-[#111118] dark:text-[#c8c8e0]'}`}
+                  className={`card-hover rounded-xl border px-2 py-2 text-sm ${buttonClass}`}
                   onClick={() => !t.unavailable && setTime(t.key)}
                 >
                   {t.label}
@@ -179,8 +198,8 @@ export default function BookingWizardView({ setCurrentView }) {
       {step === 3 && (
         <div>
           <div className="rounded-2xl border border-white/60 bg-white/70 p-5 shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-xl dark:border-[#252530]/80 dark:bg-[#111118]/80 dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
-            {SUMMARY_ROWS.map((row, idx) => (
-              <div key={row.label} className={`flex items-center justify-between py-2 ${idx !== SUMMARY_ROWS.length - 1 ? 'border-b border-slate-100 dark:border-[#1c1c25]' : ''}`}>
+            {summaryRows.map((row, idx) => (
+              <div key={row.label} className={`flex items-center justify-between py-2 ${idx < summaryRows.length - 1 ? 'border-b border-slate-100 dark:border-[#1c1c25]' : ''}`}>
                 <span className="text-xs text-slate-400 dark:text-[#606070]">{row.label}</span>
                 <span className="text-sm text-slate-600 dark:text-[#9898b0]">{row.value}</span>
               </div>
@@ -196,7 +215,30 @@ export default function BookingWizardView({ setCurrentView }) {
 
           <div className="mt-6 flex gap-3">
             <button id="bw-change-btn" className="flex-1 rounded-xl border border-slate-200 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition-all duration-150 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.97] dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5]" onClick={() => setStep(1)}>← Change Details</button>
-            <button id="bw-confirm-btn" className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)] active:scale-[0.97] dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)]" onClick={() => setCurrentView('booking-confirmed')}>Confirm Booking ✓</button>
+            <button
+              id="bw-confirm-btn"
+              className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)] active:scale-[0.97] dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)]"
+              onClick={() => {
+                const bookingPayload = {
+                  patientId: 'PT-2024-0142',
+                  patientName: 'Jane Doe',
+                  doctorId: selectedDoctor.id,
+                  doctorName: selectedDoctor.name,
+                  specialtyId: selectedSpecialty.id,
+                  specialtyLabel: selectedSpecialty.label,
+                  dayKey: selectedDay.key,
+                  dateLabel: `March ${selectedDay.date}`,
+                  dayLabel: selectedDay.label,
+                  timeKey: selectedTime.key,
+                  timeLabel: selectedTime.label,
+                  clinic: 'Hanoi Central Clinic',
+                }
+
+                onSubmitBooking(bookingPayload)
+              }}
+            >
+              Confirm Booking ✓
+            </button>
           </div>
         </div>
       )}
@@ -205,5 +247,6 @@ export default function BookingWizardView({ setCurrentView }) {
 }
 
 BookingWizardView.propTypes = {
+  onSubmitBooking: PropTypes.func.isRequired,
   setCurrentView: PropTypes.func.isRequired,
 }

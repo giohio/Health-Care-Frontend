@@ -59,6 +59,16 @@ function ChevronDownIcon() {
   )
 }
 
+function FlaskConicalIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 3h4" />
+      <path d="M10 3v6l-5.8 9.5a2 2 0 0 0 1.7 3h12.2a2 2 0 0 0 1.7-3L14 9V3" />
+      <path d="M8.5 13h7" />
+    </svg>
+  )
+}
+
 export default function DoctorTopBar({
   currentView,
   navigateTo,
@@ -66,9 +76,14 @@ export default function DoctorTopBar({
   setDark,
   dark,
   selectedPatient,
+  labOrders,
+  bookings,
+  setEmrTab,
   user,
 }) {
   const currentLabel = VIEW_LABELS[currentView] || 'Doctor Portal'
+  const activeOrders = labOrders.filter((order) => order.status === 'pending' || order.status === 'processing').length
+  const newBookings = bookings.filter((booking) => booking.status === 'pending').length
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
@@ -102,6 +117,35 @@ export default function DoctorTopBar({
       </div>
 
       <div className="flex flex-shrink-0 items-center gap-2">
+        {newBookings > 0 && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 dark:border-amber-900/50 dark:bg-amber-950/40"
+            onClick={() => navigateTo('patient-queue')}
+          >
+            <span className="inline-flex h-2.5 w-2.5 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+              {newBookings} new booking{newBookings > 1 ? 's' : ''}
+            </span>
+          </button>
+        )}
+
+        {activeOrders > 0 && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 dark:border-amber-900/50 dark:bg-amber-950/40"
+            onClick={() => {
+              setEmrTab('orders')
+              navigateTo('emr')
+            }}
+          >
+            <span className="inline-flex h-3.5 w-3.5 animate-pulse text-amber-600 dark:text-amber-400"><FlaskConicalIcon /></span>
+            <span className="text-xs font-medium text-amber-700 dark:text-amber-300">
+              {activeOrders} order{activeOrders > 1 ? 's' : ''} processing
+            </span>
+          </button>
+        )}
+
         <button
           type="button"
           className="inline-flex h-9 w-9 items-center justify-center rounded-xl transition-all duration-150 hover:bg-slate-100 dark:hover:bg-[#16161e]"
@@ -145,6 +189,17 @@ DoctorTopBar.propTypes = {
   selectedPatient: PropTypes.shape({
     name: PropTypes.string,
   }),
+  labOrders: PropTypes.arrayOf(
+    PropTypes.shape({
+      status: PropTypes.string,
+    }),
+  ),
+  bookings: PropTypes.arrayOf(
+    PropTypes.shape({
+      status: PropTypes.string,
+    }),
+  ),
+  setEmrTab: PropTypes.func.isRequired,
   user: PropTypes.shape({
     name: PropTypes.string.isRequired,
     initials: PropTypes.string.isRequired,
@@ -156,5 +211,7 @@ DoctorTopBar.propTypes = {
 }
 
 DoctorTopBar.defaultProps = {
+  bookings: [],
+  labOrders: [],
   selectedPatient: null,
 }

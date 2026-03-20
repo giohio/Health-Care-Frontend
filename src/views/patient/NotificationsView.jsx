@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
 
 function CalendarIcon() {
@@ -180,9 +180,37 @@ function getTypeVisuals(type, isRead) {
   }
 }
 
-export default function NotificationsView({ setCurrentView, unreadCount, setUnreadCount }) {
+export default function NotificationsView({
+  setCurrentView,
+  unreadCount,
+  setUnreadCount,
+  orderNotifications,
+  setOrderNotifications,
+  bookingNotifications,
+  setBookingNotifications,
+}) {
   const [activeFilter, setActiveFilter] = useState('all')
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+
+  useEffect(() => {
+    if (orderNotifications.length > 0) {
+      setNotifications((prev) => [
+        ...orderNotifications,
+        ...prev,
+      ])
+      setOrderNotifications([])
+    }
+  }, [orderNotifications, setOrderNotifications])
+
+  useEffect(() => {
+    if (bookingNotifications.length > 0) {
+      setNotifications((prev) => [
+        ...bookingNotifications,
+        ...prev,
+      ])
+      setBookingNotifications([])
+    }
+  }, [bookingNotifications, setBookingNotifications])
 
   const markAsRead = (id) => {
     const target = notifications.find((n) => n.id === id)
@@ -295,9 +323,10 @@ export default function NotificationsView({ setCurrentView, unreadCount, setUnre
             const actionLabel = getActionLabel(notification.type)
 
             return (
-              <article
+              <button
                 key={notification.id}
-                className={`relative overflow-hidden rounded-2xl border px-5 py-4 transition-all duration-300 card-hover view-enter ${
+                type="button"
+                className={`relative w-full overflow-hidden rounded-2xl border px-5 py-4 text-left transition-all duration-300 card-hover view-enter ${
                   notification.isRead
                     ? 'border-slate-100 bg-white shadow-none dark:border-[#1c1c25] dark:bg-[#0e0e15]'
                     : 'border-slate-200 bg-white shadow-[0_2px_12px_rgba(99,102,241,0.06)] dark:border-[#252530] dark:bg-[#111118] dark:shadow-[0_2px_12px_rgba(99,102,241,0.1)]'
@@ -358,7 +387,7 @@ export default function NotificationsView({ setCurrentView, unreadCount, setUnre
                     )}
                   </div>
                 </div>
-              </article>
+              </button>
             )
           })}
         </div>
@@ -368,7 +397,16 @@ export default function NotificationsView({ setCurrentView, unreadCount, setUnre
 }
 
 NotificationsView.propTypes = {
+  bookingNotifications: PropTypes.arrayOf(PropTypes.object),
+  orderNotifications: PropTypes.arrayOf(PropTypes.object),
   setCurrentView: PropTypes.func.isRequired,
+  setBookingNotifications: PropTypes.func.isRequired,
+  setOrderNotifications: PropTypes.func.isRequired,
   unreadCount: PropTypes.number.isRequired,
   setUnreadCount: PropTypes.func.isRequired,
+}
+
+NotificationsView.defaultProps = {
+  bookingNotifications: [],
+  orderNotifications: [],
 }

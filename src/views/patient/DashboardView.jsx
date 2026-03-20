@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
 import { IconWarning, IconClose, IconStethoscope, IconCalendar } from '../../icons'
+import { PATIENT_FRIENDLY_RESULTS } from '../../data/patientSpecialtyResults'
 
-export default function Dashboard({ setCurrentView, user }) {
+export default function Dashboard({ setCurrentView, user, labOrders }) {
   const [allergyDismissed, setAllergyDismissed] = useState(false)
   const firstName = user?.name?.split(' ')[0] || 'there'
+  const activeLabOrdersCount = labOrders.length
+  const recentImaging = PATIENT_FRIENDLY_RESULTS.slice(0, 3)
 
   return (
     <div className="mx-auto max-w-4xl">
       <h1 className="text-[28px] font-bold leading-tight tracking-tight text-slate-900 dark:text-[#eeeef5]">Good morning, {firstName}.</h1>
+      <span className="sr-only">Active lab orders: {activeLabOrdersCount}</span>
       <p className="mt-1 text-sm font-normal leading-relaxed text-slate-500 dark:text-[#70708a]">How are you feeling today?</p>
 
       {!allergyDismissed && (
@@ -38,8 +42,8 @@ export default function Dashboard({ setCurrentView, user }) {
         </div>
         <div className="rounded-2xl border border-white/60 bg-white/70 p-5 shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-xl dark:border-[#252530]/80 dark:bg-[#111118]/80 dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#606070]">Lab Results</p>
-          <p className="mt-1 text-3xl font-bold tracking-tight text-amber-500 dark:text-amber-400">2 New</p>
-          <p className="mt-1 text-xs text-slate-400 dark:text-[#606070]">Requires your attention</p>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-amber-500 dark:text-amber-400">5 New</p>
+          <p className="mt-1 text-xs text-slate-400 dark:text-[#606070]">Blood tests & imaging</p>
         </div>
         <div className="rounded-2xl border border-white/60 bg-white/70 p-5 shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-xl dark:border-[#252530]/80 dark:bg-[#111118]/80 dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]">
           <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#606070]">Active Allergies</p>
@@ -86,17 +90,61 @@ export default function Dashboard({ setCurrentView, user }) {
           <span className="rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 dark:border-indigo-800/50 dark:bg-indigo-950/60 dark:text-indigo-300">Confirmed</span>
         </div>
       </section>
+
+      <section className="mt-8" aria-labelledby="recent-imaging-label">
+        <div className="mb-3 flex items-center justify-between">
+          <p id="recent-imaging-label" className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#505060]">Recent Imaging Results</p>
+          <button
+            type="button"
+            onClick={() => setCurrentView('lab-results')}
+            className="text-xs font-semibold text-indigo-600 transition-colors hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+          >
+            View All
+          </button>
+        </div>
+
+        <div className="space-y-2.5">
+          {recentImaging.map((item) => (
+            <article
+              key={item.id}
+              className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-[#252530] dark:bg-[#111118] dark:shadow-none"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">{item.title}</p>
+                  <p
+                    className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-[#70708a]"
+                    style={{
+                      display: '-webkit-box',
+                      WebkitBoxOrient: 'vertical',
+                      WebkitLineClamp: 2,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {item.summary}
+                  </p>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#9898b0]">
+                  {item.date}
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
     </div>
   )
 }
 
 Dashboard.propTypes = {
   setCurrentView: PropTypes.func.isRequired,
+  labOrders: PropTypes.arrayOf(PropTypes.object),
   user: PropTypes.shape({
     name: PropTypes.string,
   }),
 }
 
 Dashboard.defaultProps = {
+  labOrders: [],
   user: null,
 }
