@@ -1,4 +1,7 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
 import PropTypes from 'prop-types'
+import { appointmentApi } from '../../api/appointment'
+import { doctorApi } from '../../api/doctor'
 
 const WEEKLY_APPOINTMENTS = [
   { day: 'Mon', value: 18 },
@@ -10,58 +13,8 @@ const WEEKLY_APPOINTMENTS = [
   { day: 'Sun', value: 5 },
 ]
 
-const SPECIALTIES = [
-  { label: 'General Practice', percent: 45, color: '#6366f1', dotClass: 'bg-indigo-500' },
-  { label: 'Neurology', percent: 22, color: '#14b8a6', dotClass: 'bg-teal-500' },
-  { label: 'Cardiology', percent: 18, color: '#f59e0b', dotClass: 'bg-amber-500' },
-  { label: 'Other', percent: 15, color: '#e2e8f0', dotClass: 'bg-slate-300 dark:bg-[#252530]' },
-]
-
-const REGISTRATIONS = [
-  {
-    name: 'Tran Thi Mai',
-    role: 'Patient',
-    date: 'Mar 19',
-    initials: 'TM',
-    avatar: 'from-rose-500 to-orange-400',
-  },
-  {
-    name: 'Nguyen Duc Anh',
-    role: 'Patient',
-    date: 'Mar 18',
-    initials: 'NA',
-    avatar: 'from-indigo-500 to-blue-400',
-  },
-  {
-    name: 'Dr. Pham Linh',
-    role: 'Doctor',
-    date: 'Mar 17',
-    initials: 'PL',
-    avatar: 'from-teal-500 to-cyan-400',
-  },
-  {
-    name: 'Le Van Thanh',
-    role: 'Patient',
-    date: 'Mar 17',
-    initials: 'LT',
-    avatar: 'from-amber-500 to-orange-400',
-  },
-  {
-    name: 'Bui Thi Hoa',
-    role: 'Patient',
-    date: 'Mar 16',
-    initials: 'BH',
-    avatar: 'from-fuchsia-500 to-rose-400',
-  },
-]
-
-const UPCOMING_APPOINTMENTS = [
-  { time: '10:00', patient: 'Jane Doe', doctor: 'Dr. Chen', type: 'Consultation', accent: 'bg-indigo-400' },
-  { time: '10:30', patient: 'Minh Tran', doctor: 'Dr. Chen', type: 'Follow-up', accent: 'bg-rose-400' },
-  { time: '11:00', patient: 'Linh Pham', doctor: 'Dr. Chen', type: 'First Visit', accent: 'bg-teal-400' },
-  { time: '14:00', patient: 'Thu Le', doctor: 'Dr. Reid', type: 'Vaccination', accent: 'bg-amber-400' },
-  { time: '14:30', patient: 'Bao Nguyen', doctor: 'Dr. Reid', type: 'Lab Review', accent: 'bg-slate-400' },
-]
+const SPECIALTY_COLORS = ['#6366f1', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16']
+const SPECIALTY_DOTS = ['bg-indigo-500', 'bg-teal-500', 'bg-amber-500', 'bg-red-500', 'bg-violet-500', 'bg-cyan-500', 'bg-pink-500', 'bg-lime-500']
 
 function DownloadIcon() {
   return (
@@ -151,8 +104,15 @@ function Settings2Icon() {
   )
 }
 
-function firstName(name) {
-  return name.split(' ')[0] || name
+function fmtVnd(v) {
+  if (v >= 1e6) return '₫' + (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return '₫' + (v / 1e3).toFixed(0) + 'K'
+  return '₫' + v
+}
+
+function firstName(user) {
+  const name = user?.full_name || user?.name || user?.email || 'Admin'
+  return name.split(/\s+/)[0] || name
 }
 
 function SectionHeader({ title, actionLabel, onAction }) {
@@ -221,12 +181,13 @@ StatCard.propTypes = {
   }).isRequired,
 }
 
-function SpecialtyDonut() {
+function SpecialtyDonut({ specialties: specData }) {
+  const total = specData.reduce((sum, s) => sum + (s.doctorCount || 0), 0) || 1
   const radius = 45
   const circumference = 2 * Math.PI * radius
-  const segments = SPECIALTIES.reduce(
+  const segments = specData.reduce(
     (acc, segment) => {
-      const length = (segment.percent / 100) * circumference
+      const length = ((segment.doctorCount || 0) / total * 100 / 100) * circumference
       const node = (
         <circle
           key={segment.label}
@@ -234,12 +195,11 @@ function SpecialtyDonut() {
           cy="60"
           r={radius}
           fill="none"
-          stroke={segment.label === 'Other' ? undefined : segment.color}
+          stroke={segment.color}
           strokeWidth="18"
           strokeDasharray={`${length} ${circumference - length}`}
           strokeDashoffset={-acc.offset}
           strokeLinecap="butt"
-          className={segment.label === 'Other' ? 'stroke-slate-200 dark:stroke-[#252530]' : undefined}
         />
       )
 
@@ -260,17 +220,17 @@ function SpecialtyDonut() {
         </svg>
 
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
-          <p className="text-sm font-bold text-slate-900 dark:text-[#eeeef5]">156</p>
-          <p className="text-xs text-slate-500 dark:text-[#70708a]">patients</p>
+          <p className="text-sm font-bold text-slate-900 dark:text-[#eeeef5]">{specData.length}</p>
+          <p className="text-xs text-slate-500 dark:text-[#70708a]">specialties</p>
         </div>
       </div>
 
       <div className="mt-2 flex w-full flex-col gap-2">
-        {SPECIALTIES.map((item) => (
+        {specData.map((item) => (
           <div key={item.label} className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${item.dotClass}`} aria-hidden="true" />
             <span className="text-xs text-slate-600 dark:text-[#9898b0]">{item.label}</span>
-            <span className="ml-auto text-xs font-semibold text-slate-900 dark:text-[#eeeef5]">{item.percent}%</span>
+            <span className="ml-auto text-xs font-semibold text-slate-900 dark:text-[#eeeef5]">{item.doctorCount}</span>
           </div>
         ))}
       </div>
@@ -278,11 +238,13 @@ function SpecialtyDonut() {
   )
 }
 
-function roleBadgeClass(role) {
-  if (role.toLowerCase() === 'doctor') {
-    return 'border-indigo-200 bg-indigo-50 text-indigo-600 dark:border-indigo-800/50 dark:bg-indigo-950/40 dark:text-indigo-400'
-  }
-  return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800/50 dark:bg-emerald-950/40 dark:text-emerald-400'
+SpecialtyDonut.propTypes = {
+  specialties: PropTypes.arrayOf(PropTypes.shape({
+    label: PropTypes.string.isRequired,
+    doctorCount: PropTypes.number.isRequired,
+    color: PropTypes.string.isRequired,
+    dotClass: PropTypes.string.isRequired,
+  })).isRequired,
 }
 
 function QuickActionButton({ icon, iconTone, label, onClick }) {
@@ -308,14 +270,115 @@ QuickActionButton.propTypes = {
 }
 
 export default function AdminDashboardView({ navigateTo, user }) {
-  const maxValue = Math.max(...WEEKLY_APPOINTMENTS.map((entry) => entry.value))
+  const [stats, setStats] = useState({ total: null, completed: null, upcoming: null })
+  const [adminStats, setAdminStats] = useState(null)
+  const [todayAppts, setTodayAppts] = useState([])
+  const [specialtyData, setSpecialtyData] = useState([])
+  const [weeklyData, setWeeklyData] = useState(WEEKLY_APPOINTMENTS)
+  const [loading, setLoading] = useState(true)
+  const loadedRef = useRef(false)
+
+  const load = useCallback(async () => {
+    if (loadedRef.current) return
+    loadedRef.current = true
+    setLoading(true)
+    try {
+      const [aStats, chartRes, todayStats] = await Promise.all([
+        appointmentApi.getAdminStats({ range: 'week' }).catch(() => null),
+        appointmentApi.getAdminChartData({ range: 'week', metric: 'appointments' }).catch(() => null),
+        appointmentApi.getAdminStats({ range: 'today' }).catch(() => null),
+      ])
+
+      if (aStats) {
+        setAdminStats(aStats)
+        // Build specialty breakdown from by_specialty
+        // Each entry may represent one doctor; group by specialty_name
+        const specMap = {}
+        ;(aStats.by_specialty || []).forEach((s) => {
+          const name = s.specialty_name || 'General'
+          if (!specMap[name]) {
+            specMap[name] = { count: 0, name }
+          }
+          specMap[name].count += s.count || 1
+        })
+        const specEntries = Object.values(specMap).map((s, i) => ({
+          label: s.name,
+          doctorCount: s.count,
+          color: SPECIALTY_COLORS[i % SPECIALTY_COLORS.length],
+          dotClass: SPECIALTY_DOTS[i % SPECIALTY_DOTS.length],
+        }))
+        setSpecialtyData(specEntries.length > 0 ? specEntries : [{ label: 'No data', doctorCount: 0, color: '#e2e8f0', dotClass: 'bg-slate-300' }])
+      }
+
+      if (chartRes && Array.isArray(chartRes.data_points)) {
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+        const todayDay = new Date().getDay()
+        setWeeklyData(chartRes.data_points.map((p) => {
+          const d = new Date(p.date)
+          const dayName = dayNames[d.getDay()] || p.label
+          return { day: dayName, value: p.value, isToday: d.getDay() === todayDay }
+        }))
+      }
+
+      // Load upcoming appointments from doctors' today queues
+      try {
+        const { doctors } = await doctorApi.getAllDoctors()
+        const todayIso = new Date().toISOString().slice(0, 10)
+        const queueResults = await Promise.allSettled(
+          doctors.slice(0, 10).map((d) => appointmentApi.getQueue(d.user_id, todayIso))
+        )
+        const ACCENT_COLORS = ['bg-indigo-400', 'bg-rose-400', 'bg-teal-400', 'bg-amber-400', 'bg-slate-400', 'bg-violet-400', 'bg-cyan-400']
+        const allQueue = queueResults
+          .filter((r) => r.status === 'fulfilled' && Array.isArray(r.value))
+          .flatMap((r) => r.value)
+          .filter((a) => {
+            const s = (a.status || '').toLowerCase()
+            return s === 'waiting' || s === 'confirmed' || s === 'scheduled'
+          })
+          .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+          .slice(0, 5)
+          .map((a, i) => ({
+            time: (a.start_time || '').slice(0, 5),
+            patient: a.patient_name || a.patient_full_name || 'Patient',
+            doctor: a.doctor_name || 'Doctor',
+            type: a.specialty_name || a.service_name || 'Appointment',
+            accent: ACCENT_COLORS[i % ACCENT_COLORS.length],
+          }))
+        setTodayAppts(allQueue)
+      } catch { /* queue loading failed */ }
+
+      if (todayStats) {
+        setStats({
+          total: todayStats.total_appointments ?? null,
+          completed: todayStats.by_status?.completed ?? null,
+          upcoming: (todayStats.by_status?.confirmed ?? 0) + (todayStats.by_status?.pending ?? 0) + (todayStats.by_status?.in_progress ?? 0) || null,
+        })
+      }
+    } catch { /* use fallback stats */ } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const totalAppointments = adminStats?.total_appointments ?? '–'
+  const totalRevenue = adminStats ? fmtVnd(adminStats.total_revenue ?? 0) : '–'
+
+  let doctorCountDisplay = '0'
+  if (loading) doctorCountDisplay = '…'
+  else if (adminStats?.by_specialty) {
+    doctorCountDisplay = String(adminStats.by_specialty.reduce((s, sp) => s + sp.count, 0))
+  }
+
+  const todayLabel = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+  const maxValue = Math.max(...weeklyData.map((entry) => entry.value), 1)
 
   return (
-    <div className="mx-auto max-w-5xl">
+    <div className="app-root mx-auto max-w-5xl">
       <div className="mb-8 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-bold tracking-tight text-slate-900 dark:text-[#eeeef5]">Good morning, {firstName(user.name)}.</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#70708a]">HealthAI Clinic · Wednesday, March 19</p>
+          <h1 className="text-[28px] font-bold tracking-tight text-slate-900 dark:text-[#eeeef5]">Good morning, {firstName(user)}.</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-[#70708a]">HealthAI Clinic · {todayLabel}</p>
         </div>
 
         <button
@@ -332,37 +395,37 @@ export default function AdminDashboardView({ navigateTo, user }) {
         <StatCard
           borderTone="border-t-indigo-500"
           valueTone="text-indigo-600 dark:text-indigo-400"
-          label="Total Patients"
-          value="1,284"
-          sub="156 registered this month"
-          trend={{ direction: 'up', text: '+12% vs last month' }}
+          label="Total Appointments"
+          value={loading ? '…' : String(totalAppointments)}
+          sub={adminStats ? `${adminStats.by_status?.completed ?? 0} completed this period` : '–'}
+          trend={{ direction: adminStats ? 'up' : 'flat', text: adminStats ? `${adminStats.completion_rate?.toFixed(1) ?? '0'}% completion` : '–' }}
         />
 
         <StatCard
           borderTone="border-t-rose-400"
           valueTone="text-rose-500 dark:text-rose-400"
           label="Appointments Today"
-          value="24"
-          sub="8 completed · 16 upcoming"
-          trend={{ direction: 'up', text: '+3% vs last month' }}
+          value={loading ? '…' : String(stats.total ?? 0)}
+          sub={stats.completed == null ? '–' : `${stats.completed} completed · ${stats.upcoming ?? 0} upcoming`}
+          trend={{ direction: 'flat', text: 'from today stats' }}
         />
 
         <StatCard
           borderTone="border-t-teal-400"
           valueTone="text-teal-600 dark:text-teal-400"
-          label="Active Doctors"
-          value="12"
-          sub="3 on duty now"
-          trend={{ direction: 'flat', text: 'same vs last month' }}
+          label="By Specialty"
+          value={doctorCountDisplay}
+          sub={`${todayAppts.length} appointments upcoming`}
+          trend={{ direction: 'flat', text: 'from admin stats' }}
         />
 
         <StatCard
           borderTone="border-t-amber-400"
           valueTone="text-amber-500 dark:text-amber-400"
-          label="Monthly Revenue"
-          value="₫84.2M"
-          sub="Target: ₫100M"
-          trend={{ direction: 'down', text: '-6% vs last month' }}
+          label="Weekly Revenue"
+          value={loading ? '…' : totalRevenue}
+          sub={adminStats ? `${adminStats.cancellation_rate?.toFixed(1) ?? '0'}% cancellation rate` : '–'}
+          trend={{ direction: adminStats && adminStats.cancellation_rate < 10 ? 'up' : 'down', text: adminStats ? `${adminStats.cancellation_rate?.toFixed(1) ?? '0'}% cancelled` : '–' }}
         />
       </section>
 
@@ -371,7 +434,7 @@ export default function AdminDashboardView({ navigateTo, user }) {
           <SectionHeader title="Appointments This Week" actionLabel="View All" onAction={() => navigateTo('appointments')} />
 
           <div className="flex h-32 items-end gap-2 px-2">
-            {WEEKLY_APPOINTMENTS.map((item) => {
+            {weeklyData.map((item) => {
               const barHeight = Math.round((item.value / maxValue) * 120)
               const barTone = item.isToday
                 ? 'bg-rose-500 dark:bg-rose-500 hover:bg-rose-600'
@@ -398,29 +461,28 @@ export default function AdminDashboardView({ navigateTo, user }) {
 
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118] xl:col-span-1">
           <SectionHeader title="By Specialty" />
-          <SpecialtyDonut />
+          <SpecialtyDonut specialties={specialtyData} />
         </article>
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118] xl:col-span-1">
-          <SectionHeader title="New This Week" actionLabel="View All" onAction={() => navigateTo('users')} />
+          <SectionHeader title="Doctors" actionLabel="View All" onAction={() => navigateTo('users')} />
 
           <div className="divide-y divide-slate-100 dark:divide-[#1c1c25]">
-            {REGISTRATIONS.map((entry) => (
-              <div key={entry.name} className="flex items-center gap-3 py-3">
-                <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xs font-bold text-white ${entry.avatar}`}>
-                  {entry.initials}
+            {specialtyData.length === 0 && (
+              <p className="py-4 text-center text-xs text-slate-400 dark:text-[#606070]">No data</p>
+            )}
+            {specialtyData.map((entry) => (
+              <div key={entry.label} className="flex items-center gap-3 py-3">
+                <span className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white`} style={{ background: entry.color }}>
+                  {entry.doctorCount}
                 </span>
 
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-slate-900 dark:text-[#eeeef5]">{entry.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-[#70708a]">{entry.role} · {entry.date}</p>
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-[#eeeef5]">{entry.label}</p>
+                  <p className="text-xs text-slate-500 dark:text-[#70708a]">{entry.doctorCount} doctor{entry.doctorCount === 1 ? '' : 's'}</p>
                 </div>
-
-                <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${roleBadgeClass(entry.role)}`}>
-                  {entry.role}
-                </span>
               </div>
             ))}
           </div>
@@ -430,13 +492,19 @@ export default function AdminDashboardView({ navigateTo, user }) {
           <SectionHeader title="Next 5 Appointments" actionLabel="View All" onAction={() => navigateTo('appointments')} />
 
           <div className="flex flex-col gap-2">
-            {UPCOMING_APPOINTMENTS.map((entry) => (
-              <article key={`${entry.time}-${entry.patient}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5 dark:border-[#1c1c25] dark:bg-[#111118]">
-                <span className={`w-[3px] self-stretch rounded-full ${entry.accent}`} aria-hidden="true" />
-                <span className="w-14 shrink-0 text-[11px] font-medium text-slate-400 dark:text-[#606070]">{entry.time}</span>
+            {loading && (
+              <p className="py-4 text-center text-xs text-slate-400 dark:text-[#606070]">Loading…</p>
+            )}
+            {!loading && todayAppts.length === 0 && (
+              <p className="py-4 text-center text-xs text-slate-400 dark:text-[#606070]">No upcoming appointments</p>
+            )}
+            {todayAppts.map((entry) => (
+              <article key={`${entry.time}-${entry.patient ?? entry.patient_name}`} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-white px-3 py-2.5 dark:border-[#1c1c25] dark:bg-[#111118]">
+                <span className={`w-[3px] self-stretch rounded-full ${entry.accent ?? 'bg-indigo-400'}`} aria-hidden="true" />
+                <span className="w-14 shrink-0 text-[11px] font-medium text-slate-400 dark:text-[#606070]">{entry.time ?? entry.start_time}</span>
                 <span className="min-w-0">
-                  <span className="block truncate text-xs font-semibold text-slate-800 dark:text-[#c8c8e0]">{entry.patient}</span>
-                  <span className="block truncate text-[11px] text-slate-500 dark:text-[#70708a]">{entry.doctor} · {entry.type}</span>
+                  <span className="block truncate text-xs font-semibold text-slate-800 dark:text-[#c8c8e0]">{entry.patient ?? entry.patient_name}</span>
+                  <span className="block truncate text-[11px] text-slate-500 dark:text-[#70708a]">{entry.doctor ?? entry.doctor_name} · {entry.type ?? entry.specialty_name}</span>
                 </span>
               </article>
             ))}

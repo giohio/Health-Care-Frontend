@@ -25,10 +25,14 @@ function ChevronDownIcon() {
   )
 }
 
-export default function Navbar({ currentView, setCurrentView }) {
+export default function Navbar({ currentView, setCurrentView, user = {} }) {
   function navClass(view) {
     return `nav-link${currentView === view ? ' nav-link--active' : ''}`
   }
+
+  const initials = user?.initials || user?.full_name?.split(/\s+/).map((p) => p[0]).join('').toUpperCase().slice(0, 2) || 'U'
+  const displayName = user?.full_name || user?.name || user?.email?.split('@')[0] || 'User'
+  const firstName = displayName.split(/\s+/)[0]
 
   return (
     <header className="navbar" role="banner">
@@ -82,10 +86,10 @@ export default function Navbar({ currentView, setCurrentView }) {
           type="button"
           className="navbar-profile-btn"
           onClick={() => setCurrentView('health-record')}
-          aria-label="Open health record for Jane Doe"
+          aria-label={`Open health record for ${firstName}`}
         >
-          <div className="navbar-avatar" aria-hidden="true">JD</div>
-          <span className="navbar-name">Jane Doe</span>
+          <div className="navbar-avatar" aria-hidden="true">{initials}</div>
+          <span className="navbar-name">{displayName}</span>
           <span className="navbar-chevron" aria-hidden="true"><ChevronDownIcon /></span>
         </button>
       </div>
@@ -94,6 +98,12 @@ export default function Navbar({ currentView, setCurrentView }) {
 }
 
 Navbar.propTypes = {
-  currentView:    PropTypes.string.isRequired,
+  currentView: PropTypes.string.isRequired,
   setCurrentView: PropTypes.func.isRequired,
+  user: PropTypes.shape({
+    initials: PropTypes.string,
+    full_name: PropTypes.string,
+    name: PropTypes.string,
+    email: PropTypes.string,
+  }),
 }

@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import PropTypes from 'prop-types'
+import { authApi } from '../../api/auth'
+import { paymentApi } from '../../api/payment'
 import { useAdminSettings } from '../../context/AdminSettingsContext'
 
 const INPUT_CLASS =
@@ -7,7 +9,8 @@ const INPUT_CLASS =
 
 const SECTION_ITEMS = [
   { key: 'clinic', label: 'Clinic Info', icon: Building2Icon },
-  { key: 'hours', label: 'Working Hours', icon: ClockIcon },
+  { key: 'hours', label: 'Working Hours', icon: IconClock },
+  { key: 'lab-fees', label: 'Lab Test Fees', icon: DollarSignIcon },
   { key: 'notifications', label: 'Notifications', icon: BellIcon },
   { key: 'security', label: 'Security', icon: ShieldIcon },
   { key: 'appearance', label: 'Appearance', icon: PaletteIcon },
@@ -63,11 +66,20 @@ function Building2Icon(props) {
   )
 }
 
-function ClockIcon(props) {
+function IconClock(props) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
       <circle cx="12" cy="12" r="10" />
       <polyline points="12 6 12 12 16 14" />
+    </svg>
+  )
+}
+
+function DollarSignIcon(props) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>
+      <line x1="12" y1="1" x2="12" y2="23" />
+      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
     </svg>
   )
 }
@@ -98,6 +110,12 @@ function PaletteIcon(props) {
       <circle cx="16.5" cy="9.5" r="1" />
     </svg>
   )
+}
+
+function saveLabel(saved, saving) {
+  if (saved) return 'Saved!'
+  if (saving) return 'Saving…'
+  return 'Save Changes'
 }
 
 function Toggle({ enabled, onToggle, disabled = false }) {
@@ -142,6 +160,7 @@ SectionCard.propTypes = {
 export default function SystemConfigView({ user }) {
   const [activeSection, setActiveSection] = useState('clinic')
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
   const {
     themeMode,
     setThemeMode,
@@ -151,8 +170,21 @@ export default function SystemConfigView({ user }) {
     setSidebarSize,
   } = useAdminSettings()
 
+  const [clinicName, setClinicName] = useState('HealthAI Medical Center')
+  const [supportEmail, setSupportEmail] = useState('contact@healthai.vn')
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  const [maxAppointments, setMaxAppointments] = useState(50)
+  const [workingHoursStart, setWorkingHoursStart] = useState('08:00')
+  const [workingHoursEnd, setWorkingHoursEnd] = useState('17:00')
+
   const [hours, setHours] = useState(INITIAL_HOURS)
   const [duration, setDuration] = useState(30)
+
+  const [labFees, setLabFees] = useState([])
+  const [labFeeEdits, setLabFeeEdits] = useState({})
+  const [labFeeLoading, setLabFeeLoading] = useState(false)
+  const [labFeeSaving, setLabFeeSaving] = useState(null)
+  const [labFeeError, setLabFeeError] = useState('')
 
   const [notificationSettings, setNotificationSettings] = useState([
     { key: 'appointment-reminders', title: 'Appointment Reminders', sub: 'Send SMS + email 24h before', enabled: true },
@@ -180,9 +212,108 @@ export default function SystemConfigView({ user }) {
     { key: 'special', label: 'Special characters required', checked: false },
   ])
 
-  const handleSave = () => {
-    setSaved(true)
-    setTimeout(() => setSaved(false), 3000)
+  const loadConfig = useCallback(async () => {
+    try {
+      const cfg = await authApi.getConfig()
+      if (cfg.clinic_name != null) setClinicName(cfg.clinic_name)
+      if (cfg.support_email != null) setSupportEmail(cfg.support_email)
+      if (cfg.maintenance_mode != null) setMaintenanceMode(cfg.maintenance_mode)
+      if (cfg.default_slot_duration_minutes != null) setDuration(cfg.default_slot_duration_minutes)
+      if (cfg.max_appointments_per_day != null) setMaxAppointments(cfg.max_appointments_per_day)
+      if (cfg.working_hours_start != null) setWorkingHoursStart(cfg.working_hours_start)
+      if (cfg.working_hours_end != null) setWorkingHoursEnd(cfg.working_hours_end)
+    } catch { /* keep defaults */ }
+
+    // Load notification settings from backend
+    try {
+      const notifRes = await authApi.getNotificationSettings()
+      if (notifRes.settings != null) setNotificationSettings(notifRes.settings)
+    } catch { /* keep defaults */ }
+
+    // Load security settings from backend
+    try {
+      const secRes = await authApi.getSecuritySettings()
+      if (secRes != null) {
+        const mapped = [
+          { key: 'two-factor', title: 'Two-Factor Authentication', sub: 'Require 2FA for all staff logins', enabled: !!secRes.two_factor },
+          { key: 'session-timeout', title: 'Session Timeout', sub: 'Auto logout after 30 minutes', enabled: true },
+          { key: 'login-limit', title: 'Login Attempt Limit', sub: 'Lock after 5 failed attempts', enabled: true },
+          { key: 'audit-log', title: 'Audit Log', sub: 'Record all data access events', enabled: !!secRes.audit_log },
+        ]
+        setSecuritySettings(mapped)
+        if (secRes.session_timeout_minutes) {
+          const mins = Number(secRes.session_timeout_minutes)
+          if (mins >= 60) setTimeoutDuration(`${mins / 60} hour`)
+          else setTimeoutDuration(`${mins} min`)
+        }
+        if (Array.isArray(secRes.password_rules)) {
+          setPasswordRules(secRes.password_rules)
+        }
+      }
+    } catch { /* keep defaults */ }
+  }, [])
+
+  useEffect(() => { loadConfig() }, [loadConfig])
+
+  const fetchLabFees = useCallback(async () => {
+    setLabFeeLoading(true)
+    setLabFeeError('')
+    try {
+      const configs = await paymentApi.getLabFeeConfigs()
+      const list = Array.isArray(configs)
+        ? configs
+        : Array.isArray(configs?.data)
+          ? configs.data
+          : Array.isArray(configs?.items)
+            ? configs.items
+            : []
+
+      setLabFees(list)
+      setLabFeeEdits({})
+
+      if (!Array.isArray(configs) && list.length === 0) {
+        setLabFeeError('Could not parse lab fee payload from API response.')
+      }
+    } catch (err) {
+      console.error('Failed to load lab fees', err)
+      setLabFeeError(err?.message || 'Failed to load lab fees')
+      setLabFees([])
+    } finally {
+      setLabFeeLoading(false)
+    }
+  }, [])
+
+  // Fetch lab fees when section changes to 'lab-fees'
+  useEffect(() => {
+    if (activeSection === 'lab-fees') {
+      fetchLabFees()
+    }
+  }, [activeSection, fetchLabFees])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await Promise.all([
+        authApi.updateConfig({
+          clinic_name: clinicName,
+          support_email: supportEmail,
+          maintenance_mode: maintenanceMode,
+          default_slot_duration_minutes: duration,
+          max_appointments_per_day: maxAppointments,
+          working_hours_start: workingHoursStart,
+          working_hours_end: workingHoursEnd,
+        }),
+        authApi.updateNotificationSettings(notificationSettings),
+        authApi.updateSecuritySettings({
+          audit_log: securitySettings.find((s) => s.key === 'audit-log')?.enabled ?? true,
+          password_rules: passwordRules,
+        }),
+      ])
+      setSaved(true)
+      setTimeout(() => setSaved(false), 3000)
+    } catch { /* save failed */ } finally {
+      setSaving(false)
+    }
   }
 
   const toggleHour = (day) => {
@@ -219,6 +350,26 @@ export default function SystemConfigView({ user }) {
     )
   }
 
+  const handleLabFeeEdit = (testId, newFee) => {
+    setLabFeeEdits(prev => ({ ...prev, [testId]: newFee }))
+  }
+
+  const handleLabFeeSave = async (testId) => {
+    const newFee = labFeeEdits[testId]
+    if (!newFee || newFee < 0) return
+    
+    setLabFeeSaving(testId)
+    try {
+      await paymentApi.updateLabFee(testId, newFee)
+      setLabFees(prev => prev.map(f => f.test_id === testId ? { ...f, fee: newFee } : f))
+      setLabFeeEdits(prev => { const copy = { ...prev }; delete copy[testId]; return copy })
+    } catch (err) {
+      console.error('Failed to save lab fee', err)
+    } finally {
+      setLabFeeSaving(null)
+    }
+  }
+
   return (
     <>
       <span className="sr-only">{user.name}</span>
@@ -241,7 +392,7 @@ export default function SystemConfigView({ user }) {
           }`}
         >
           {saved ? <CheckIcon className="h-4 w-4" /> : <SaveIcon className="h-4 w-4" />}
-          {saved ? 'Saved!' : 'Save Changes'}
+          {saveLabel(saved, saving)}
         </button>
       </div>
 
@@ -280,7 +431,7 @@ export default function SystemConfigView({ user }) {
               <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
                 <label className="md:col-span-2">
                   <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-[#9898b0]">Clinic Name</span>
-                  <input type="text" defaultValue="HealthAI Medical Center" className={INPUT_CLASS} />
+                  <input type="text" value={clinicName} onChange={(e) => setClinicName(e.target.value)} className={INPUT_CLASS} />
                 </label>
 
                 <label className="md:col-span-2">
@@ -294,8 +445,8 @@ export default function SystemConfigView({ user }) {
                 </label>
 
                 <label>
-                  <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-[#9898b0]">Email</span>
-                  <input type="email" defaultValue="contact@healthai.vn" className={INPUT_CLASS} />
+                  <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-[#9898b0]">Support Email</span>
+                  <input type="email" value={supportEmail} onChange={(e) => setSupportEmail(e.target.value)} className={INPUT_CLASS} />
                 </label>
 
                 <label>
@@ -317,6 +468,26 @@ export default function SystemConfigView({ user }) {
                   <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-[#9898b0]">Established</span>
                   <input type="date" defaultValue="2020-01-15" className={INPUT_CLASS} />
                 </label>
+
+                <label>
+                  <span className="mb-1.5 block text-xs font-medium text-slate-600 dark:text-[#9898b0]">Max Appointments / Day</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={200}
+                    value={maxAppointments}
+                    onChange={(e) => setMaxAppointments(Number(e.target.value))}
+                    className={INPUT_CLASS}
+                  />
+                </label>
+
+                <div className="flex items-center justify-between md:col-span-2">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900 dark:text-[#eeeef5]">Maintenance Mode</p>
+                    <p className="mt-0.5 text-xs text-slate-500 dark:text-[#70708a]">Temporarily disable patient-facing features</p>
+                  </div>
+                  <Toggle enabled={maintenanceMode} onToggle={() => setMaintenanceMode((v) => !v)} />
+                </div>
 
                 <div className="mt-2 md:col-span-2">
                   <p className="mb-1.5 text-xs font-medium text-slate-600 dark:text-[#9898b0]">Clinic Logo</p>
@@ -397,6 +568,125 @@ export default function SystemConfigView({ user }) {
                   ))}
                 </div>
               </div>
+
+              <div className="mt-6 border-t border-slate-100 pt-6 dark:border-[#1c1c25]">
+                <p className="mb-3 text-xs font-medium text-slate-600 dark:text-[#9898b0]">Default Working Hours (saved to server)</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={workingHoursStart}
+                    onChange={(e) => setWorkingHoursStart(e.target.value)}
+                    className={`${INPUT_CLASS} w-36`}
+                  />
+                  <span className="text-xs text-slate-400 dark:text-[#606070]">to</span>
+                  <input
+                    type="time"
+                    value={workingHoursEnd}
+                    onChange={(e) => setWorkingHoursEnd(e.target.value)}
+                    className={`${INPUT_CLASS} w-36`}
+                  />
+                </div>
+              </div>
+            </SectionCard>
+          )}
+
+          {activeSection === 'lab-fees' && (
+            <SectionCard>
+              <div className="mb-6 flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-[#1c1c25]">
+                <div>
+                  <h2 className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Lab Test Fees</h2>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#9898b0]">
+                    Configure and update pricing for laboratory tests (in VND)
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={fetchLabFees}
+                  disabled={labFeeLoading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#1c1c25]"
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {!!labFeeError && (
+                <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
+                  {labFeeError}
+                </div>
+              )}
+
+              {labFeeLoading && (
+                <div className="flex items-center justify-center py-8">
+                  <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-200 border-t-rose-600 dark:border-[#252530] dark:border-t-rose-400" />
+                </div>
+              )}
+
+              {!labFeeLoading && labFees.length === 0 && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-600 dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#9898b0]">
+                  No lab fees configured yet
+                </div>
+              )}
+
+              {!labFeeLoading && labFees.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-[#1c1c25]">
+                        <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-[#9898b0]">Test Name</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-[#9898b0]">Test ID</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-[#9898b0]">Fee (VND)</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-600 dark:text-[#9898b0]">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-[#1c1c25]">
+                      {labFees.map(fee => {
+                        const editValue = labFeeEdits[fee.test_id]
+                        const isEditing = editValue !== undefined
+                        return (
+                          <tr key={fee.test_id} className="hover:bg-slate-50 dark:hover:bg-[#1c1c25]">
+                            <td className="px-4 py-3 text-slate-900 dark:text-[#eeeef5]">{fee.test_name}</td>
+                            <td className="px-4 py-3 text-slate-500 dark:text-[#9898b0]">{fee.test_id}</td>
+                            <td className="px-4 py-3">
+                              {isEditing ? (
+                                <input
+                                  type="number"
+                                  value={editValue}
+                                  onChange={(e) => handleLabFeeEdit(fee.test_id, parseInt(e.target.value, 10) || 0)}
+                                  className="w-32 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#eeeef5]"
+                                />
+                              ) : (
+                                <span className="text-slate-900 dark:text-[#eeeef5]">
+                                  {new Intl.NumberFormat('vi-VN').format(fee.fee)}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              {isEditing ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleLabFeeSave(fee.test_id)}
+                                  disabled={labFeeSaving === fee.test_id}
+                                  className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-700 dark:hover:bg-emerald-600"
+                                >
+                                  {labFeeSaving === fee.test_id ? 'Saving...' : 'Save'}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleLabFeeEdit(fee.test_id, fee.fee)}
+                                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e]"
+                                >
+                                  Edit
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </SectionCard>
           )}
 

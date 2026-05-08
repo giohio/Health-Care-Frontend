@@ -1,11 +1,12 @@
 import PropTypes from 'prop-types'
 
 const VIEW_LABELS = {
-  dashboard: 'Doctor Dashboard',
-  'patient-queue': 'Patient Queue',
+  dashboard: 'Clinical Board',
   schedule: 'Schedule',
   emr: 'EMR Workspace',
-  'doctor-chat': 'Doctor Chat',
+  'doctor-chat': 'Clinical Assistant',
+  'lab-review': 'Lab Review',
+  profile: 'Settings',
 }
 
 function MenuIcon() {
@@ -75,7 +76,6 @@ export default function DoctorTopBar({
   setMobileOpen,
   setDark,
   dark,
-  selectedPatient,
   labOrders,
   bookings,
   setEmrTab,
@@ -86,9 +86,10 @@ export default function DoctorTopBar({
   const newBookings = bookings.filter((booking) => booking.status === 'pending').length
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
-      <div className="flex flex-shrink-0 items-center gap-3">
-        <button
+    <div className="sticky top-0 z-30 flex flex-col w-full">
+      <header className="app-root flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
+        <div className="flex flex-shrink-0 items-center gap-3">
+          <button
           type="button"
           className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-50 hover:text-slate-900 dark:text-[#606070] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5] md:hidden"
           onClick={() => setMobileOpen(true)}
@@ -160,8 +161,8 @@ export default function DoctorTopBar({
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-50 dark:hover:bg-[#16161e]"
-          onClick={() => navigateTo('patient-queue')}
-          aria-label="Open patient queue"
+          onClick={() => navigateTo('profile')}
+          aria-label="Open settings"
         >
           <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-semibold text-white ${user.avatar.from} ${user.avatar.to}`}>
             {user.initials}
@@ -170,13 +171,8 @@ export default function DoctorTopBar({
           <span className="hidden h-[14px] w-[14px] text-slate-400 dark:text-[#606070] lg:inline-flex"><ChevronDownIcon /></span>
         </button>
       </div>
-
-      {selectedPatient && (
-        <div className="absolute bottom-[-32px] right-6 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 shadow-sm dark:border-indigo-900/50 dark:bg-indigo-950/40 dark:text-indigo-300">
-          Active Patient: {selectedPatient.name}
-        </div>
-      )}
-    </header>
+      </header>
+    </div>
   )
 }
 
@@ -187,8 +183,10 @@ DoctorTopBar.propTypes = {
   setDark: PropTypes.func.isRequired,
   dark: PropTypes.bool.isRequired,
   selectedPatient: PropTypes.shape({
+    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     name: PropTypes.string,
   }),
+  setSelectedPatient: PropTypes.func,
   labOrders: PropTypes.arrayOf(
     PropTypes.shape({
       status: PropTypes.string,
@@ -214,4 +212,5 @@ DoctorTopBar.defaultProps = {
   bookings: [],
   labOrders: [],
   selectedPatient: null,
+  setSelectedPatient: null,
 }

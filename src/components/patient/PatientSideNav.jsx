@@ -8,7 +8,7 @@ const NAV_ITEMS = [
     label: 'My Appointments',
     icon: CalendarIcon,
     isActive: (view) => view === 'appointments' || view === 'reschedule' || view === 'reschedule-confirmed',
-    badge: () => 3,
+    badge: (unreadCount) => unreadCount,
   },
   {
     key: 'lab-results',
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
     badge: (unreadCount) => unreadCount,
     badgeTone: 'amber',
   },
+  { key: 'payment-history', label: 'Payment History', icon: ReceiptIcon },
   { key: 'health-record', label: 'Health Record', icon: RecordIcon },
   {
     key: 'notifications',
@@ -76,6 +77,17 @@ function RecordIcon() {
       <line x1="8" y1="8" x2="16" y2="8" />
       <line x1="8" y1="12" x2="16" y2="12" />
       <line x1="8" y1="16" x2="13" y2="16" />
+    </svg>
+  )
+}
+
+function ReceiptIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 3h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-3-2V5a2 2 0 0 1 2-2z" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="9" y1="12" x2="15" y2="12" />
+      <line x1="9" y1="16" x2="13" y2="16" />
     </svg>
   )
 }
@@ -247,7 +259,10 @@ function ThemeToggle({ dark, setDark, expanded }) {
     <button
       type="button"
       className={`group relative flex ${expanded ? 'w-full justify-between px-3' : 'mx-auto w-10 justify-center'} items-center rounded-xl py-2 transition-all duration-150 hover:bg-slate-50 dark:hover:bg-[#16161e]`}
-      onClick={() => setDark(!dark)}
+      onClick={() => {
+        setDark(!dark)
+        localStorage.setItem('healthai-theme', !dark ? 'dark' : 'light')
+      }}
     >
       <span className="inline-flex items-center gap-3">
         <span className="inline-flex h-[18px] w-[18px] text-slate-400 dark:text-[#606070]">{dark ? <MoonIcon /> : <SunIcon />}</span>
@@ -461,6 +476,7 @@ export default function PatientSideNav({
       <div
         className={`fixed inset-0 z-40 bg-slate-900/40 transition-opacity duration-300 dark:bg-black/60 md:hidden ${mobileOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'}`}
         onClick={() => setMobileOpen(false)}
+        onKeyDown={(e) => e.key === 'Escape' && setMobileOpen(false)}
         aria-hidden={!mobileOpen}
       />
 

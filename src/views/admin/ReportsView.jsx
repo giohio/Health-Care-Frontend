@@ -1,84 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
+import { appointmentApi } from '../../api/appointment'
 
 const DATE_RANGES = [
   { key: 'week', label: 'Week' },
   { key: 'month', label: 'Month' },
   { key: 'quarter', label: 'Quarter' },
-  { key: 'year', label: 'Year' },
 ]
 
-const KPI_CARDS = [
-  {
-    label: 'Total Appointments',
-    value: '486',
-    trend: '+8%',
-    trendTone: 'text-emerald-600 dark:text-emerald-400',
-    stripe: 'bg-indigo-500',
-    valueTone: 'text-indigo-600 dark:text-indigo-400',
-  },
-  {
-    label: 'New Patients',
-    value: '156',
-    trend: '+12%',
-    trendTone: 'text-emerald-600 dark:text-emerald-400',
-    stripe: 'bg-teal-500',
-    valueTone: 'text-teal-600 dark:text-teal-400',
-  },
-  {
-    label: 'Revenue',
-    value: '₫84.2M',
-    trend: '-6%',
-    trendTone: 'text-rose-600 dark:text-rose-400',
-    stripe: 'bg-amber-500',
-    valueTone: 'text-amber-600 dark:text-amber-400',
-  },
-  {
-    label: 'Avg. Satisfaction',
-    value: '4.8★',
-    trend: '+2%',
-    trendTone: 'text-emerald-600 dark:text-emerald-400',
-    stripe: 'bg-emerald-500',
-    valueTone: 'text-emerald-600 dark:text-emerald-400',
-  },
-]
-
-const REVENUE_POINTS = [
-  { label: 'Jan', value: 52 },
-  { label: 'Feb', value: 61 },
-  { label: 'Mar', value: 58 },
-  { label: 'Apr', value: 70 },
-  { label: 'May', value: 65 },
-  { label: 'Jun', value: 78 },
-  { label: 'Jul', value: 72 },
-  { label: 'Aug', value: 80 },
-  { label: 'Sep', value: 75 },
-  { label: 'Oct', value: 88 },
-  { label: 'Nov', value: 82 },
-  { label: 'Dec', value: 91 },
-]
-
-const TOP_DOCTORS = [
-  { name: 'Dr. Sarah Chen', specialty: 'General Medicine', count: 48, width: 100, avatar: 'from-teal-500 to-cyan-400' },
-  { name: 'Dr. Marcus Reid', specialty: 'Cardiology', count: 36, width: 75, avatar: 'from-indigo-500 to-violet-400' },
-  { name: 'Dr. Linh Nguyen', specialty: 'Neurology', count: 29, width: 60, avatar: 'from-cyan-500 to-teal-400' },
-  { name: 'Dr. Anh Pham', specialty: 'General Medicine', count: 24, width: 50, avatar: 'from-slate-500 to-gray-400' },
-  { name: 'Dr. Bao Le', specialty: 'Cardiology', count: 19, width: 40, avatar: 'from-emerald-500 to-lime-400' },
-]
-
-const APPOINTMENT_TYPES = [
-  { label: 'Consultation', count: 198, percent: 41, color: 'bg-indigo-500 dark:bg-indigo-400' },
-  { label: 'Follow-up', count: 142, percent: 29, color: 'bg-teal-500 dark:bg-teal-400' },
-  { label: 'First Visit', count: 87, percent: 18, color: 'bg-violet-500 dark:bg-violet-400' },
-  { label: 'Chronic Review', count: 35, percent: 7, color: 'bg-amber-500 dark:bg-amber-400' },
-  { label: 'Vaccination', count: 24, percent: 5, color: 'bg-emerald-500 dark:bg-emerald-400' },
-]
-
-const DEMOGRAPHICS = [
-  { label: '18–30', count: 312, percent: 24, color: 'bg-indigo-500 dark:bg-indigo-400' },
-  { label: '31–45', count: 428, percent: 33, color: 'bg-teal-500 dark:bg-teal-400' },
-  { label: '46–60', count: 356, percent: 28, color: 'bg-amber-500 dark:bg-amber-400' },
-  { label: '60+', count: 188, percent: 15, color: 'bg-rose-500 dark:bg-rose-400' },
+const SPECIALTY_COLORS = ['from-teal-500 to-cyan-400', 'from-indigo-500 to-violet-400', 'from-cyan-500 to-teal-400', 'from-slate-500 to-gray-400', 'from-emerald-500 to-lime-400']
+const STATUS_COLORS = [
+  { key: 'completed', label: 'Completed', barColor: 'bg-emerald-500 dark:bg-emerald-400' },
+  { key: 'confirmed', label: 'Confirmed', barColor: 'bg-indigo-500 dark:bg-indigo-400' },
+  { key: 'pending', label: 'Pending', barColor: 'bg-amber-500 dark:bg-amber-400' },
+  { key: 'cancelled', label: 'Cancelled', barColor: 'bg-rose-500 dark:bg-rose-400' },
 ]
 
 const EXPORT_OPTIONS = [
@@ -204,6 +139,19 @@ function formatRangeLabel(range) {
   return 'Last 12 months'
 }
 
+function fmtVnd(v) {
+  if (v >= 1e6) return '₫' + (v / 1e6).toFixed(1) + 'M'
+  if (v >= 1e3) return '₫' + (v / 1e3).toFixed(0) + 'K'
+  return '₫' + v
+}
+
+function fmtTickLabel(v, maxValue) {
+  const val = Math.round((v * maxValue))
+  if (val >= 1e6) return '₫' + (val / 1e6).toFixed(1) + 'M'
+  if (val >= 1e3) return '₫' + (val / 1e3).toFixed(0) + 'K'
+  return '₫' + val
+}
+
 function createSmoothPath(points) {
   if (points.length < 2) return ''
 
@@ -217,11 +165,86 @@ function createSmoothPath(points) {
   return `${start} ${curves.join(' ')}`
 }
 
-export default function ReportsView({ navigateTo, user }) {
+export default function ReportsView({ user }) {
   const [dateRange, setDateRange] = useState('month')
   const [hoveredPoint, setHoveredPoint] = useState(null)
+  const [stats, setStats] = useState(null)
+  const [revenuePoints, setRevenuePoints] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const downloadCSV = useCallback((filename, headers, rows) => {
+    const escape = (v) => {
+      const s = String(v ?? '')
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replaceAll('"', '""')}"`  : s
+    }
+    const csvContent = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n')
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [])
+
+  const handleExport = useCallback((key) => {
+    switch (key) {
+      case 'appointment-report': {
+        const rows = (stats?.by_status ? Object.entries(stats.by_status) : []).map(([status, count]) => [status, count])
+        downloadCSV(`appointment-report-${dateRange}.csv`, ['Status', 'Count'], rows)
+        break
+      }
+      case 'revenue-report': {
+        const rows = revenuePoints.map(p => [p.label, p.value])
+        downloadCSV(`revenue-report-${dateRange}.csv`, ['Period', 'Revenue (VND)'], rows)
+        break
+      }
+      case 'patient-list': {
+        const specRows = (stats?.by_specialty || []).map(s => [s.specialty_name, s.count, s.revenue ?? 0])
+        downloadCSV(`specialty-report-${dateRange}.csv`, ['Specialty', 'Appointments', 'Revenue (VND)'], specRows)
+        break
+      }
+      case 'doctor-performance': {
+        const rows = (stats?.by_specialty || []).map(s => [s.specialty_name, s.doctor_count ?? '', s.count, s.revenue ?? 0])
+        downloadCSV(`doctor-performance-${dateRange}.csv`, ['Specialty', 'Doctors', 'Appointments', 'Revenue (VND)'], rows)
+        break
+      }
+      case 'db-backup': {
+        const payload = JSON.stringify({ exported_at: new Date().toISOString(), stats, revenue: revenuePoints }, null, 2)
+        const blob = new Blob([payload], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `db-backup-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+        break
+      }
+      default:
+        break
+    }
+  }, [stats, revenuePoints, dateRange, downloadCSV])
+
+  const loadData = useCallback(async (range) => {
+    setLoading(true)
+    try {
+      const [statsRes, chartRes] = await Promise.all([
+        appointmentApi.getAdminStats({ range }).catch(() => null),
+        appointmentApi.getAdminChartData({ range, metric: 'revenue' }).catch(() => null),
+      ])
+      if (statsRes) setStats(statsRes)
+      if (chartRes && Array.isArray(chartRes.data_points)) {
+        setRevenuePoints(chartRes.data_points.map((p) => ({ label: p.label, value: p.value })))
+      }
+    } catch { /* keep current */ } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData(dateRange) }, [dateRange, loadData])
 
   const chartData = useMemo(() => {
+    if (revenuePoints.length < 2) return null
     const width = 500
     const height = 160
     const paddingTop = 14
@@ -229,10 +252,10 @@ export default function ReportsView({ navigateTo, user }) {
     const paddingLeft = 12
     const innerWidth = width - paddingLeft * 2
     const innerHeight = height - paddingTop - paddingBottom
-    const maxValue = 100
+    const maxValue = Math.max(...revenuePoints.map((p) => p.value), 1)
 
-    const points = REVENUE_POINTS.map((item, index) => {
-      const x = paddingLeft + (index * innerWidth) / (REVENUE_POINTS.length - 1)
+    const points = revenuePoints.map((item, index) => {
+      const x = paddingLeft + (index * innerWidth) / (revenuePoints.length - 1)
       const y = paddingTop + (1 - item.value / maxValue) * innerHeight
       return { ...item, x, y }
     })
@@ -247,12 +270,45 @@ export default function ReportsView({ navigateTo, user }) {
       width,
       height,
       xLabelsY: height - 4,
-      yTicks: [0, 25, 50, 75, 100].map((value) => ({
-        label: `₫${value}M`,
-        y: paddingTop + (1 - value / 100) * innerHeight,
+      maxValue,
+      yTicks: [0, 0.25, 0.5, 0.75, 1].map((frac) => ({
+          label: fmtTickLabel(frac, maxValue),
+          y: paddingTop + (1 - frac) * innerHeight,
       })),
     }
-  }, [])
+  }, [revenuePoints])
+
+  const kpiCards = useMemo(() => {
+    if (!stats) return []
+    const fmt = (v) => fmtVnd(v)
+    return [
+      { label: 'Total Appointments', value: String(stats.total_appointments ?? 0), stripe: 'bg-indigo-500', valueTone: 'text-indigo-600 dark:text-indigo-400' },
+      { label: 'Completion Rate', value: `${(stats.completion_rate ?? 0).toFixed(1)}%`, stripe: 'bg-teal-500', valueTone: 'text-teal-600 dark:text-teal-400' },
+      { label: 'Revenue', value: fmt(stats.total_revenue ?? 0), stripe: 'bg-amber-500', valueTone: 'text-amber-600 dark:text-amber-400' },
+      { label: 'Cancellation Rate', value: `${(stats.cancellation_rate ?? 0).toFixed(1)}%`, stripe: 'bg-rose-500', valueTone: 'text-rose-600 dark:text-rose-400' },
+    ]
+  }, [stats])
+
+  const statusBreakdown = useMemo(() => {
+    if (!stats?.by_status) return []
+    const total = Object.values(stats.by_status).reduce((s, v) => s + v, 0) || 1
+    return STATUS_COLORS.map((sc) => {
+      const count = stats.by_status[sc.key] ?? 0
+      return { label: sc.label, count, percent: Math.round((count / total) * 100), color: sc.barColor }
+    }).filter((s) => s.count > 0)
+  }, [stats])
+
+  const specialtyBreakdown = useMemo(() => {
+    if (!stats?.by_specialty || stats.by_specialty.length === 0) return []
+    const maxCount = Math.max(...stats.by_specialty.map((s) => s.count), 1)
+    return stats.by_specialty.map((s, i) => ({
+      name: s.specialty_name,
+      count: s.count,
+      revenue: s.revenue,
+      width: Math.round((s.count / maxCount) * 100),
+      avatar: SPECIALTY_COLORS[i % SPECIALTY_COLORS.length],
+    }))
+  }, [stats])
 
   return (
     <>
@@ -261,7 +317,11 @@ export default function ReportsView({ navigateTo, user }) {
       <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-[#eeeef5]">Reports &amp; Analytics</h1>
-          <p className="mt-1 text-sm text-slate-600 dark:text-[#9898b0]">Data as of March 19, 2025</p>
+          <p className="mt-1 text-sm text-slate-600 dark:text-[#9898b0]">
+            {stats?.period?.date_from && stats?.period?.date_to 
+              ? `${stats.period.date_from} to ${stats.period.date_to}` 
+              : formatRangeLabel(dateRange)}
+          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -284,25 +344,25 @@ export default function ReportsView({ navigateTo, user }) {
 
           <button
             type="button"
-            onClick={() => navigateTo('reports/export-pdf')}
+            onClick={() => handleExport('revenue-report')}
             className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 transition-all duration-150 hover:border-slate-300 hover:bg-slate-50 dark:border-[#252530] dark:bg-[#111118] dark:text-[#9898b0] dark:hover:border-[#353545] dark:hover:bg-[#1c1c25]"
           >
             <FileDownIcon className="h-4 w-4" />
-            Export PDF
+            Export CSV
           </button>
         </div>
       </div>
 
       <div className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {KPI_CARDS.map((card) => (
+        {loading && !stats && (
+          <p className="col-span-full py-4 text-center text-xs text-slate-400 dark:text-[#606070]">Loading…</p>
+        )}
+        {kpiCards.map((card) => (
           <article key={card.label} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-[#252530] dark:bg-[#111118]">
             <div className={`h-1.5 w-full ${card.stripe}`} />
             <div className="px-4 py-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-[#70708a]">{card.label}</p>
-              <div className="mt-2 flex items-end justify-between gap-2">
-                <p className={`text-3xl font-bold ${card.valueTone}`}>{card.value}</p>
-                <p className={`text-xs font-semibold ${card.trendTone}`}>{card.trend}</p>
-              </div>
+              <p className={`mt-2 text-3xl font-bold ${card.valueTone}`}>{card.value}</p>
             </div>
           </article>
         ))}
@@ -312,19 +372,23 @@ export default function ReportsView({ navigateTo, user }) {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118] xl:col-span-2">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Revenue Trend</h2>
-            <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">{formatRangeLabel(dateRange)} · Current: ₫84M</p>
+            <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">{formatRangeLabel(dateRange)}{stats ? ' · Total: ' + fmtVnd(stats.total_revenue) : ''}</p>
           </div>
 
           <div className="relative">
-            {hoveredPoint !== null && (
+            {!chartData && (
+              <p className="py-12 text-center text-xs text-slate-400 dark:text-[#606070]">{loading ? 'Loading chart…' : 'No chart data'}</p>
+            )}
+            {chartData && hoveredPoint !== null && (
               <div
                 className="pointer-events-none absolute -top-8 z-10 -translate-x-1/2 rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-[#0a0a0f]"
                 style={{ left: `${(chartData.points[hoveredPoint].x / chartData.width) * 100}%` }}
               >
-                {chartData.points[hoveredPoint].label}: ₫{chartData.points[hoveredPoint].value}M
+                {chartData.points[hoveredPoint].label}: ₫{chartData.points[hoveredPoint].value.toLocaleString()}
               </div>
             )}
 
+            {chartData && (
             <svg viewBox={`0 0 ${chartData.width} ${chartData.height}`} className="h-64 w-full" aria-label="Revenue trend chart">
               {chartData.yTicks.map((tick) => (
                 <g key={tick.label}>
@@ -356,7 +420,7 @@ export default function ReportsView({ navigateTo, user }) {
                     onMouseEnter={() => setHoveredPoint(index)}
                     onMouseLeave={() => setHoveredPoint(null)}
                   >
-                    <title>{`${point.label}: ₫${point.value}M`}</title>
+                    <title>{`${point.label}: ₫${point.value.toLocaleString()}`}</title>
                   </circle>
                   <text x={point.x} y={chartData.xLabelsY} textAnchor="middle" className="fill-slate-400 text-[11px] dark:fill-[#606070]">
                     {point.label}
@@ -364,35 +428,34 @@ export default function ReportsView({ navigateTo, user }) {
                 </g>
               ))}
             </svg>
+            )}
           </div>
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118]">
           <div className="mb-4">
-            <h2 className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Top Doctors</h2>
-            <p className="mt-1 text-xs text-slate-500 dark:text-[#70708a]">by patient count this month</p>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">By Specialty</h2>
+            <p className="mt-1 text-xs text-slate-500 dark:text-[#70708a]">appointments count</p>
           </div>
 
           <div className="flex flex-col gap-3">
-            {TOP_DOCTORS.map((doctor, index) => (
-              <div key={doctor.name} className="flex items-center gap-3">
+            {specialtyBreakdown.length === 0 && (
+              <p className="py-4 text-center text-xs text-slate-400 dark:text-[#606070]">{loading ? 'Loading…' : 'No data'}</p>
+            )}
+            {specialtyBreakdown.map((item, index) => (
+              <div key={item.name} className="flex items-center gap-3">
                 <span className="w-5 flex-shrink-0 text-right text-sm font-bold text-slate-300 dark:text-[#404050]">#{index + 1}</span>
-                <div className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xs font-semibold text-white ${doctor.avatar}`}>
-                  {doctor.name
-                    .split(' ')
-                    .filter((word) => word !== 'Dr.')
-                    .slice(0, 2)
-                    .map((word) => word[0])
-                    .join('')}
+                <div className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xs font-semibold text-white ${item.avatar}`}>
+                  {item.name.split(/\s+/).slice(0, 2).map((w) => w[0]).join('')}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-slate-900 dark:text-[#eeeef5]">{doctor.name}</p>
-                  <p className="truncate text-xs text-slate-500 dark:text-[#70708a]">{doctor.specialty}</p>
+                  <p className="truncate text-sm font-medium text-slate-900 dark:text-[#eeeef5]">{item.name}</p>
+                  <p className="truncate text-xs text-slate-500 dark:text-[#70708a]">{fmtVnd(item.revenue ?? 0)}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  <span className="text-sm font-bold text-slate-900 dark:text-[#eeeef5]">{doctor.count}</span>
+                  <span className="text-sm font-bold text-slate-900 dark:text-[#eeeef5]">{item.count}</span>
                   <div className="h-1.5 w-16 rounded-full bg-slate-100 dark:bg-[#1c1c25]">
-                    <div className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400" style={{ width: `${doctor.width}%` }} />
+                    <div className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400" style={{ width: `${item.width}%` }} />
                   </div>
                 </div>
               </div>
@@ -403,8 +466,11 @@ export default function ReportsView({ navigateTo, user }) {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118]">
-          <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-[#eeeef5]">By Type</h2>
-          {APPOINTMENT_TYPES.map((type) => (
+          <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-[#eeeef5]">By Status</h2>
+          {statusBreakdown.length === 0 && (
+            <p className="py-4 text-center text-xs text-slate-400 dark:text-[#606070]">{loading ? 'Loading…' : 'No data'}</p>
+          )}
+          {statusBreakdown.map((type) => (
             <div key={type.label} className="mb-3 flex flex-col gap-1 last:mb-0">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-slate-700 dark:text-[#c8c8e0]">{type.label}</p>
@@ -418,29 +484,34 @@ export default function ReportsView({ navigateTo, user }) {
         </section>
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118]">
-          <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Demographics</h2>
-          {DEMOGRAPHICS.map((item) => (
-            <div key={item.label} className="mb-3 flex flex-col gap-1 last:mb-0">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-slate-700 dark:text-[#c8c8e0]">{item.label}</p>
-                <p className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">{item.count} patients</p>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-[#1c1c25]">
-                <div className={`h-full rounded-full ${item.color}`} style={{ width: `${item.percent}%` }} />
-              </div>
-            </div>
-          ))}
+          <h2 className="mb-4 text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Summary</h2>
 
-          <div className="mt-4 flex gap-4 border-t border-slate-100 pt-4 dark:border-[#1c1c25]">
-            <div className="flex-1">
-              <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Female</p>
-              <p className="mt-1 text-2xl font-bold text-indigo-600 dark:text-indigo-400">724</p>
-              <p className="text-xs text-slate-500 dark:text-[#70708a]">56%</p>
+          <div className="flex flex-col gap-4">
+            <div>
+              <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Total Appointments</p>
+              <p className="mt-1 text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+                {typeof stats?.total_appointments === 'number' ? stats.total_appointments : (stats?.total_appointments ?? '–')}
+              </p>
             </div>
-            <div className="flex-1">
-              <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Male</p>
-              <p className="mt-1 text-2xl font-bold text-teal-600 dark:text-teal-400">560</p>
-              <p className="text-xs text-slate-500 dark:text-[#70708a]">44%</p>
+            <div>
+              <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Total Revenue</p>
+              <p className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">
+                {stats ? fmtVnd(stats.total_revenue) : '–'}
+              </p>
+            </div>
+            <div className="flex gap-4 border-t border-slate-100 pt-4 dark:border-[#1c1c25]">
+              <div className="flex-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Completion</p>
+                <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                  {stats && typeof stats.completion_rate === 'number' ? `${stats.completion_rate.toFixed(1)}%` : '–'}
+                </p>
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-medium text-slate-500 dark:text-[#70708a]">Cancellation</p>
+                <p className="mt-1 text-2xl font-bold text-rose-600 dark:text-rose-400">
+                  {stats && typeof stats.cancellation_rate === 'number' ? `${stats.cancellation_rate.toFixed(1)}%` : '–'}
+                </p>
+              </div>
             </div>
           </div>
         </section>
@@ -455,7 +526,7 @@ export default function ReportsView({ navigateTo, user }) {
                 <button
                   key={option.key}
                   type="button"
-                  onClick={() => navigateTo(option.action)}
+                  onClick={() => handleExport(option.key)}
                   className="-mx-3 flex items-center justify-between rounded-xl border-b border-slate-100 px-3 py-3 text-left transition hover:bg-slate-50 dark:border-[#1c1c25] dark:hover:bg-[#16161e] last:border-0"
                 >
                   <div className="flex items-center gap-3">
@@ -480,7 +551,6 @@ export default function ReportsView({ navigateTo, user }) {
 }
 
 ReportsView.propTypes = {
-  navigateTo: PropTypes.func.isRequired,
   user: PropTypes.shape({
     name: PropTypes.string.isRequired,
   }).isRequired,

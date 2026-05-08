@@ -56,6 +56,14 @@ const ABCDE_ITEMS = [
 ]
 
 export default function DermatologyPanel({ data }) {
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <p className="text-sm font-medium text-slate-500 dark:text-[#70708a]">No dermatology data available</p>
+        <p className="mt-1 text-xs text-slate-400 dark:text-[#505060]">Order a dermoscopy study to view results here.</p>
+      </div>
+    )
+  }
   const sorted = [...data.classProbabilities].sort((a, b) => b.probability - a.probability)
   const badge = headerResult(data)
 

@@ -60,8 +60,9 @@ function getAccentStyles(accentColor) {
 
 const NAV_ITEMS = [
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboardIcon },
-  { key: 'users', label: 'User Management', icon: UsersIcon, badge: '156', badgeTone: 'neutral' },
-  { key: 'appointments', label: 'Appointments', icon: CalendarDaysIcon, badge: '24', badgeTone: 'rose' },
+  { key: 'users', label: 'User Management', icon: UsersIcon },
+  { key: 'appointments', label: 'Appointments', icon: CalendarDaysIcon },
+  { key: 'payment-history', label: 'Payment History', icon: ReceiptIcon },
   { key: 'reports', label: 'Reports', icon: BarChart3Icon },
   { key: 'settings', label: 'System Settings', icon: Settings2Icon },
 ]
@@ -114,6 +115,17 @@ function BarChart3Icon() {
       <line x1="12" y1="20" x2="12" y2="10" />
       <line x1="18" y1="20" x2="18" y2="4" />
       <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  )
+}
+
+function ReceiptIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 3h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-3-2V5a2 2 0 0 1 2-2z" />
+      <line x1="9" y1="8" x2="15" y2="8" />
+      <line x1="9" y1="12" x2="15" y2="12" />
+      <line x1="9" y1="16" x2="13" y2="16" />
     </svg>
   )
 }

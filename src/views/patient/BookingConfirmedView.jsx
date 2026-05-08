@@ -1,36 +1,64 @@
+import { useState, useEffect } from 'react'
 import PropTypes from 'prop-types'
-import { IconCheck } from '../../icons'
+import { IconCheck, IconClock, IconX } from '../../icons'
+import { paymentApi } from '../../api/payment'
+import { NOTIFICATION_EVENT } from '../../constants/enums'
 
-function ClockIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <polyline points="12 7 12 12 15 14" />
-    </svg>
-  )
-}
+export default function BookingConfirmedView({ setCurrentView, booking, wsNotifications }) {
+  const [paymentUrl, setPaymentUrl] = useState(null)
+  const [pollingMsg, setPollingMsg] = useState('Generating payment link...')
 
-function XIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="18" y1="6" x2="6" y2="18" />
-      <line x1="6" y1="6" x2="18" y2="18" />
-    </svg>
-  )
-}
+  // Poll payment URL after booking
+  useEffect(() => {
+    if (!booking?.id) return
+    let cancelled = false
 
-export default function BookingConfirmedView({ setCurrentView, booking }) {
-  const status = booking?.status || 'pending'
-  const isPending = status === 'pending'
-  const isConfirmed = status === 'confirmed'
-  const isCancelled = status === 'cancelled'
+    async function pollPaymentUrl() {
+      for (let i = 0; i < 8; i++) {
+        await new Promise((r) => globalThis.setTimeout(r, 2000))
+        if (cancelled) return
+        try {
+          const payment = await paymentApi.initiatePayment(booking.id)
+          const url = payment?.payment_url ?? payment?.url ?? payment?.data?.payment_url ?? payment?.data?.url
+          if (url) {
+            setPaymentUrl(url)
+            return
+          }
+        } catch (err) {
+          // 404 = payment record not yet created by backend; keep polling
+          // 409 = already paid/failed; stop
+          if (err?.status !== 404) return
+        }
+      }
+      if (!cancelled) setPollingMsg('Please try again later')
+    }
+
+    pollPaymentUrl()
+    return () => { cancelled = true }
+  }, [booking?.id])
+
+  // Listen for payment.created WebSocket notification — the polling mechanism above
+  // already handles fetching the URL; here we simply ensure the effect runs when
+  // a new notification arrives so the poller can pick it up on the next tick.
+  useEffect(() => {
+    if (!wsNotifications || !booking?.id) return undefined
+    const latest = wsNotifications[0]
+    if (latest?.event_type === NOTIFICATION_EVENT.PAYMENT_CREATED) {
+      // Payment URL will be resolved by the polling effect; no action needed here.
+    }
+    return undefined
+  }, [wsNotifications, booking?.id])
+  const apiStatus = booking?.status || 'pending'
+  const isPending = apiStatus === 'pending' || apiStatus === 'pending_payment'
+  const isConfirmed = apiStatus === 'confirmed'
+  const isCancelled = apiStatus === 'cancelled' || apiStatus === 'declined'
 
   let title = 'Awaiting confirmation'
   if (isCancelled) title = 'Appointment Unavailable'
   if (isConfirmed) title = 'Appointment Confirmed'
 
   const subtitle = booking
-    ? `${booking.doctorName} · ${booking.dayLabel}, ${booking.dateLabel} · ${booking.timeLabel}`
+    ? `Dr. ${booking.doctor_name || ''} - ${booking.appointment_date || ''} - ${booking.start_time || ''}`
     : 'We are preparing your appointment details.'
 
   let ringClass = 'border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/40'
@@ -47,22 +75,45 @@ export default function BookingConfirmedView({ setCurrentView, booking }) {
     iconWrapClass = 'bg-indigo-600 ring-pulse shadow-[0_8px_25px_rgba(99,102,241,0.4)] dark:shadow-[0_8px_30px_rgba(99,102,241,0.3)]'
   }
 
+  const ringClassName = `relative mx-auto mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border ${ringClass}`
+  const innerClassName = `absolute inset-2 rounded-full ${innerClass}`
+  const iconWrapClassName = `relative inline-flex h-12 w-12 items-center justify-center rounded-full text-white ${iconWrapClass}`
+
+  let statusIcon = <span className="inline-flex h-6 w-6"><IconClock /></span>
+  if (isCancelled) statusIcon = <IconX />
+  if (isConfirmed) statusIcon = <IconCheck size={24} />
+
   return (
     <div className="mx-auto max-w-xl py-12 text-center">
-      <div className={`relative mx-auto mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border ${ringClass}`}>
-        <div className={`absolute inset-2 rounded-full ${innerClass}`} />
+      <div className={ringClassName}>
+        <div className={innerClassName} />
 
-        <div className={`relative inline-flex h-12 w-12 items-center justify-center rounded-full text-white ${iconWrapClass}`}>
-          {isCancelled && <XIcon />}
-          {isConfirmed && <IconCheck size={24} />}
-          {isPending && <span className="inline-flex h-6 w-6"><ClockIcon /></span>}
+        <div className={iconWrapClassName}>
+          {statusIcon}
         </div>
       </div>
 
       <h1 className="text-[28px] font-bold leading-tight tracking-tight text-slate-900 dark:text-[#eeeef5]">{title}</h1>
       <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-[#9898b0]">{subtitle}</p>
 
-      {isPending && (
+      {isPending && !paymentUrl && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <span className="h-5 w-5 animate-spin rounded-full border-2 border-slate-200 border-t-indigo-500" />
+          <p className="text-sm text-slate-500 dark:text-[#70708a]">{pollingMsg}</p>
+        </div>
+      )}
+
+      {paymentUrl && (
+        <a
+          href={paymentUrl}
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-amber-500 px-6 py-2.5 text-sm font-semibold text-white shadow-md hover:-translate-y-px hover:bg-amber-600 transition-all duration-150"
+          rel="noopener noreferrer"
+        >
+          Pay via VNPAY
+        </a>
+      )}
+
+      {isPending && !paymentUrl && (
         <p className="mt-3 text-sm font-medium text-amber-700 dark:text-amber-300">We sent your request to the clinic. You will be notified when a doctor confirms.</p>
       )}
 
@@ -93,15 +144,17 @@ export default function BookingConfirmedView({ setCurrentView, booking }) {
 
 BookingConfirmedView.propTypes = {
   booking: PropTypes.shape({
-    dateLabel: PropTypes.string,
-    dayLabel: PropTypes.string,
-    doctorName: PropTypes.string,
+    id: PropTypes.string,
+    appointment_date: PropTypes.string,
+    start_time: PropTypes.string,
+    doctor_name: PropTypes.string,
     status: PropTypes.string,
-    timeLabel: PropTypes.string,
   }),
   setCurrentView: PropTypes.func.isRequired,
+  wsNotifications: PropTypes.arrayOf(PropTypes.object),
 }
 
 BookingConfirmedView.defaultProps = {
   booking: null,
+  wsNotifications: [],
 }

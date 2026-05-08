@@ -6,71 +6,43 @@ import { PATIENT_FRIENDLY_RESULTS } from '../../data/patientSpecialtyResults'
 import AiRiskBadge from '../../components/shared/AiRiskBadge'
 import { formatRelativeTime, getTimeRemaining } from '../../utils/formatTime'
 import { emrApi } from '../../api/emr'
-    doctor: 'Dr. Sarah Chen',
-    date: 'Received Mar 10, 2025',
-    aiSummary: 'Most values are within normal range. Hemoglobin is slightly low - worth discussing with your doctor.',
-    flags: 1,
-    explanation: "Your results look mostly healthy. Your red blood cell count and white blood cell count are both within expected ranges, which is a good sign. However, your hemoglobin level came in slightly below the normal threshold. This can sometimes cause mild fatigue or low energy. It's not an emergency, but it's worth mentioning to Dr. Chen at your next visit - she may recommend dietary adjustments or a simple iron supplement.",
-    details: [
-      { test: 'Hemoglobin', yourValue: '11.2 g/dL', normalRange: '12.0-16.0 g/dL', status: 'Low' },
-      { test: 'White Blood Cells', yourValue: '6.8 K/uL', normalRange: '4.5-11.0 K/uL', status: 'Normal' },
-      { test: 'Platelets', yourValue: '245 K/uL', normalRange: '150-400 K/uL', status: 'Normal' },
-      { test: 'Hematocrit', yourValue: '34.1%', normalRange: '36-46%', status: 'Low' },
-      { test: 'Red Blood Cells', yourValue: '4.1 M/uL', normalRange: '4.2-5.4 M/uL', status: 'Normal' },
-    ],
-  },
-  {
-    id: 'lipid-profile',
-    aiKey: 'lipid-profile',
-    name: 'Lipid Profile',
-    status: 'New',
-    doctor: 'Dr. Sarah Chen',
-    date: 'Received Mar 10, 2025',
-    aiSummary: 'LDL cholesterol is above the recommended level. Your doctor may suggest dietary changes.',
-    flags: 2,
-    explanation: 'Your lipid panel suggests elevated LDL cholesterol compared with the ideal range. This is a common pattern and can often be improved through nutrition, regular activity, and follow-up monitoring. Discuss this result with your doctor so you can decide whether lifestyle changes alone are enough or if additional treatment is needed.',
-    details: [
-      { test: 'Total Cholesterol', yourValue: '212 mg/dL', normalRange: '< 200 mg/dL', status: 'High' },
-      { test: 'LDL Cholesterol', yourValue: '146 mg/dL', normalRange: '< 100 mg/dL', status: 'High' },
-      { test: 'HDL Cholesterol', yourValue: '52 mg/dL', normalRange: '> 40 mg/dL', status: 'Normal' },
-      { test: 'Triglycerides', yourValue: '132 mg/dL', normalRange: '< 150 mg/dL', status: 'Normal' },
-      { test: 'Non-HDL Cholesterol', yourValue: '160 mg/dL', normalRange: '< 130 mg/dL', status: 'High' },
-    ],
-  },
-  {
-    id: 'thyroid-function',
-    aiKey: 'thyroid-function',
-    name: 'Thyroid Function (TSH)',
-    status: 'Reviewed',
-    doctor: 'Dr. Linh Nguyen',
-    date: 'Received Jan 22, 2025',
-    aiSummary: 'Thyroid hormone levels are normal. No action needed.',
-    flags: 0,
-    explanation: 'Your thyroid markers are within normal limits, which means your thyroid function looks stable. No urgent follow-up is required based on this test alone. Continue routine checkups as advised by your care team.',
-    details: [
-      { test: 'TSH', yourValue: '2.3 mIU/L', normalRange: '0.4-4.0 mIU/L', status: 'Normal' },
-      { test: 'Free T4', yourValue: '1.2 ng/dL', normalRange: '0.8-1.8 ng/dL', status: 'Normal' },
-      { test: 'Free T3', yourValue: '3.1 pg/mL', normalRange: '2.3-4.2 pg/mL', status: 'Normal' },
-    ],
-  },
-  {
-    id: 'vitamin-iron',
-    aiKey: 'vitamin-iron',
-    name: 'Vitamin D & Iron Panel',
-    status: 'Reviewed',
-    doctor: 'Dr. Sarah Chen',
-    date: 'Received Aug 14, 2024',
-    aiSummary: 'Mild iron deficiency detected. Supplement was prescribed following this result.',
-    flags: 1,
-    explanation: "This panel showed mild iron deficiency at the time of testing. Your care plan already included supplementation, which is a standard and effective response. Keep following your doctor's guidance and monitor symptoms like fatigue during follow-up.",
-    details: [
-      { test: 'Ferritin', yourValue: '18 ng/mL', normalRange: '20-200 ng/mL', status: 'Low' },
-      { test: 'Serum Iron', yourValue: '58 ug/dL', normalRange: '60-170 ug/dL', status: 'Low' },
-      { test: 'Vitamin D (25-OH)', yourValue: '31 ng/mL', normalRange: '30-100 ng/mL', status: 'Normal' },
-      { test: 'Transferrin Saturation', yourValue: '21%', normalRange: '20-50%', status: 'Normal' },
-    ],
-  },
-]
+import { paymentApi } from '../../api/payment'
+import { Toast } from '../../components/shared/Toast'
+import { stripAiWarning } from '../../components/emr/labResultUtils'
+
+/** Map a published_findings / ai_visual_findings JSON array to the details row shape. */
+function mapFindingsToDetails(findings) {
+  if (!Array.isArray(findings) || findings.length === 0) return []
+  return findings.map((f) => {
+    // Blood-panel style: { name, value, unit, flag, reference_low, reference_high }
+    if (f.name && f.value !== undefined) {
+      const hasRef = f.reference_low !== undefined && f.reference_high !== undefined
+      const ref = hasRef
+        ? `${f.reference_low}–${f.reference_high} ${f.unit || ''}`.trim()
+        : (f.unit || '-')
+      const statusMap = { high: 'High', low: 'Low', normal: 'Normal', H: 'High', L: 'Low', N: 'Normal' }
+      const unitSuffix = f.unit ? ` ${f.unit}` : ''
+      return {
+        test: f.name,
+        yourValue: `${f.value}${unitSuffix}`,
+        normalRange: ref || '-',
+        status: statusMap[f.flag] || 'Normal',
+      }
+    }
+    // Imaging style: { finding, severity, region, location }
+    if (f.finding) {
+      const statusMap = { normal: 'Normal', mild: 'Normal', moderate: 'High', severe: 'High' }
+      const location = f.region || f.location || ''
+      return {
+        test: location ? `${f.finding} (${location})` : f.finding,
+        yourValue: f.severity || '-',
+        normalRange: '-',
+        status: statusMap[(f.severity || '').toLowerCase()] || 'Normal',
+      }
+    }
+    return null
+  }).filter(Boolean)
+}
 
 function dotsByRiskLevel(riskLevel) {
   if (riskLevel === 'high') return ['bg-rose-400', 'bg-rose-400', 'bg-slate-200 dark:bg-[#252530]']
@@ -100,6 +72,32 @@ function themeClasses(theme) {
   return styles[theme] || styles.teal
 }
 
+/** Format a PATIENT_FRIENDLY_RESULTS item (imaging/signal) as a selectedLab object for LabDetailView. */
+function mapImagingToSelectedLab(imaging) {
+  let normalizedSeverity = 'Normal'
+  if (imaging.riskLevel === 'medium') normalizedSeverity = 'Watch'
+  else if (imaging.riskLevel === 'high') normalizedSeverity = 'High'
+  return {
+    id: imaging.id,
+    name: imaging.title,
+    status: 'New',
+    doctor: 'AI Analysis',
+    date: `Received ${imaging.date}`,
+    explanation: imaging.details,
+    aiSummary: imaging.summary,
+    ai_draft_text: imaging.summary,
+    published_text: imaging.summary,
+    flags: imaging.riskLevel === 'low' ? 0 : 1,
+    details: imaging.findings.map((f) => ({
+      test: f,
+      yourValue: normalizedSeverity,
+      normalRange: '-',
+      status: normalizedSeverity,
+    })),
+    patient_id: null,
+  }
+}
+
 function FlaskConicalIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -110,43 +108,83 @@ function FlaskConicalIcon() {
   )
 }
 
-export default function LabResultsView({ setCurrentView, setSelectedLab, labOrders, currentUser }) {
+/** Map a single API lab result + order into the view's lab shape. */
+function mapApiResultToLab(apiRes, ordersMap, patientId) {
+  const order = ordersMap[apiRes.order_id] || null
+  const testName = order?.test_name || null
+  const rawFindings = apiRes.published_findings || apiRes.ai_visual_findings
+  let findings = rawFindings
+  if (typeof rawFindings === 'string') {
+    try { findings = JSON.parse(rawFindings) } catch { findings = [] }
+  }
+  const details = mapFindingsToDetails(findings)
+  const abnormalCount = details.filter(d => d.status !== 'Normal').length
+  const rawSummaryText = apiRes.published_text || apiRes.ai_draft_text || 'Results are ready for review.'
+  const summaryText = stripAiWarning(rawSummaryText)
+  const label = testName
+    || (apiRes.file_type && apiRes.file_type !== 'manual' ? `Lab Result (${apiRes.file_type.toUpperCase()})` : null)
+    || 'Lab Result'
+  return {
+    id: apiRes.id,
+    order_id: apiRes.order_id,
+    patient_id: patientId,
+    name: label,
+    status: apiRes.status === 'PUBLISHED' ? 'Reviewed' : 'New',
+    doctor: 'Your Doctor',
+    date: `Received ${formatRelativeTime(apiRes.created_at || new Date())}`,
+    aiSummary: summaryText,
+    flags: abnormalCount,
+    explanation: summaryText,
+    ai_draft_text: apiRes.ai_draft_text,
+    published_text: apiRes.published_text,
+    ai_visual_findings: apiRes.ai_visual_findings,
+    published_findings: apiRes.published_findings,
+    fileUrl: apiRes.file_url,
+    details,
+  }
+}
+
+export default function LabResultsView({ setCurrentView, setSelectedLab, setSelectedLab: _passedSetSelectedLab, labOrders, currentUser }) {
   const [resultType, setResultType] = useState('blood')
   const [filter, setFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [imagingFilter, setImagingFilter] = useState('all')
   const [selectedImagingId, setSelectedImagingId] = useState(null)
   const [readyNotifiedOrderIds, setReadyNotifiedOrderIds] = useState([])
   const [toastMessage, setToastMessage] = useState('')
   const [fetchedResults, setFetchedResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [fetchError, setFetchError] = useState(null)
+  const [paymentLoading, setPaymentLoading] = useState(null) // orderId being paid
 
   useEffect(() => {
     async function fetchLabResults() {
       if (!currentUser?.id) return
+      setLoading(true)
+      setFetchError(null)
       try {
-        const res = await emrApi.getLabResults({ patient_id: currentUser.id })
-        if (res.success && res.data) {
-          const items = Array.isArray(res.data) ? res.data : (res.data.items || [])
-          
-          const mapped = items.map(apiRes => {
-            const aiData = apiRes.ai_draft_text ? { recommendation: apiRes.ai_draft_text } : null
-            return {
-              id: apiRes.id,
-              aiKey: apiRes.id,
-              name: apiRes.file_type ? `Lab Reuslt (${apiRes.file_type.toUpperCase()})` : 'Lab Result',
-              status: apiRes.status === 'PUBLISHED' ? 'Reviewed' : 'New',
-              doctor: 'Your Doctor', // Fallback as we might not have the doctor name linked directly in the compact response
-              date: `Received ${formatRelativeTime(apiRes.created_at || new Date())}`,
-              aiSummary: aiData?.recommendation || 'Results are ready for review.',
-              flags: 0,
-              explanation: aiData?.recommendation || 'Results were generated from your recent lab order.',
-              fileUrl: apiRes.file_url,
-              details: [] // Mapped details if available from API
-            }
-          })
-          setFetchedResults(mapped)
+        const [resultsRes, ordersRes] = await Promise.allSettled([
+          emrApi.getLabResults({ patient_id: currentUser.id }),
+          emrApi.getLabOrders({ patient_id: currentUser.id }),
+        ])
+
+        let items = []
+        if (resultsRes.status === 'fulfilled' && resultsRes.value) {
+          const raw = resultsRes.value
+          items = Array.isArray(raw) ? raw : (raw.items || raw.data || [])
         }
+
+        const ordersMap = {}
+        if (ordersRes.status === 'fulfilled' && Array.isArray(ordersRes.value)) {
+          for (const o of ordersRes.value) ordersMap[o.id] = o
+        }
+
+        const mapped = items.map(apiRes => mapApiResultToLab(apiRes, ordersMap, currentUser.id))
+        setFetchedResults(mapped)
       } catch (err) {
         console.error('Failed to fetch lab results', err)
+        setFetchError('Unable to load your lab results. Please try again later.')
+      } finally {
+        setLoading(false)
       }
     }
     fetchLabResults()
@@ -154,24 +192,33 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
 
   const pendingOrders = useMemo(() => (
     labOrders.filter(
-      (order) => order.patientId === 'PT-2024-0142' && (
+      (order) => order.patientId === currentUser?.id && (
         order.status === 'pending'
         || order.status === 'processing'
         || order.status === 'PENDING'
       ),
     )
-  ), [labOrders])
+  ), [labOrders, currentUser])
+
+  // Filter unpaid lab orders: fee > 0 && payment_status !== "PAID"
+  const unpaidOrders = useMemo(() => (
+    labOrders.filter(
+      (order) => order.patientId === currentUser?.id 
+        && order.fee > 0 
+        && order.payment_status !== 'PAID'
+    )
+  ), [labOrders, currentUser])
 
   const readyOrders = useMemo(() => (
     labOrders.filter(
-      (order) => order.patientId === 'PT-2024-0142' && (
+      (order) => order.patientId === currentUser?.id && (
         order.status === 'ready'
         || order.status === 'reviewed'
         || order.status === 'AI_DRAFT'
         || order.status === 'PUBLISHED'
       ),
     )
-  ), [labOrders])
+  ), [labOrders, currentUser])
 
   const dynamicReadyResults = useMemo(() => (
     readyOrders.map((order) => {
@@ -196,18 +243,15 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
     })
   ), [readyOrders])
 
-const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResults, ...LAB_RESULTS]), [fetchedResults, dynamicReadyResults])
+const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResults]), [fetchedResults, dynamicReadyResults])
 
   const visibleResults = useMemo(() => {
+    if (filter === 'pending') return []
     let scopedResults = allBloodResults
-
-    if (filter === 'new') scopedResults = scopedResults.filter((result) => result.status === 'New')
-    if (filter === 'reviewed') scopedResults = scopedResults.filter((result) => result.status === 'Reviewed')
-
-    if (statusFilter === 'pending') return []
-    if (statusFilter === 'ready') return scopedResults
+    if (filter === 'new') scopedResults = scopedResults.filter((r) => r.status === 'New')
+    if (filter === 'reviewed') scopedResults = scopedResults.filter((r) => r.status === 'Reviewed')
     return scopedResults
-  }, [allBloodResults, filter, statusFilter])
+  }, [allBloodResults, filter])
 
   const selectedImaging = useMemo(
     () => PATIENT_FRIENDLY_RESULTS.find((item) => item.id === selectedImagingId) || null,
@@ -220,99 +264,155 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
 
     const startTimer = globalThis.setTimeout(() => {
       setReadyNotifiedOrderIds((prev) => [...prev, unseenReadyOrder.id])
-      setToastMessage(`✓ Lab results for ${unseenReadyOrder.tests.join(', ')} are now ready.`)
+      setToastMessage(`Lab results for ${unseenReadyOrder.tests.join(', ')} are now ready.`)
     }, 0)
-
-    const clearTimer = globalThis.setTimeout(() => {
-      setToastMessage('')
-    }, 2800)
 
     return () => {
       globalThis.clearTimeout(startTimer)
-      globalThis.clearTimeout(clearTimer)
     }
   }, [readyNotifiedOrderIds, readyOrders])
 
+  const handlePayNow = async (orderId) => {
+    setPaymentLoading(orderId)
+    try {
+      const result = await paymentApi.getLabPaymentUrl(orderId)
+      if (result?.payment_url) {
+        window.location.href = result.payment_url
+      } else {
+        setToastMessage('Unable to generate payment URL. Please try again.')
+      }
+    } catch (err) {
+      console.error('Failed to get payment URL', err)
+      setToastMessage('Payment processing failed. Please try again later.')
+    } finally {
+      setPaymentLoading(null)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-4xl">
-      <style>{`@keyframes progress { 0% { width: 60%; } 50% { width: 80%; } 100% { width: 60%; } }`}</style>
 
       <h1 className="text-[28px] font-bold leading-tight tracking-tight text-slate-900 dark:text-[#eeeef5]">Lab Results</h1>
       <p className="mt-1 text-sm text-slate-400 dark:text-[#606070]">Your test results, explained in plain language by AI.</p>
 
-      <div className="mt-5 mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-[#252530] dark:bg-[#111118]">
-        {[
-          ['blood', 'Blood Tests'],
-          ['imaging', 'Imaging & Signals'],
-        ].map(([key, label]) => {
-          const active = resultType === key
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => {
-                setResultType(key)
-                setSelectedImagingId(null)
-              }}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${active ? 'bg-slate-900 text-white dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'text-slate-500 hover:text-slate-700 dark:text-[#70708a] dark:hover:text-[#c8c8e0]'}`}
-            >
-              {label}
-            </button>
-          )
-        })}
-      </div>
+      {/* Payment Required Banner */}
+      {unpaidOrders.length > 0 && (
+        <div className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 p-4 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+          <div className="flex gap-3">
+            <div className="flex-shrink-0 pt-0.5">
+              <svg className="h-5 w-5 text-indigo-600 dark:text-indigo-400" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 5v8a2 2 0 0 1-2 2h-5l-5 4v-4H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-indigo-900 dark:text-indigo-200">Payment Required</h3>
+              <p className="mt-1 text-xs text-indigo-700 dark:text-indigo-300">
+                {unpaidOrders.length} lab test{unpaidOrders.length !== 1 ? 's' : ''} need payment before collection.
+              </p>
+              <div className="mt-3 space-y-2">
+                {unpaidOrders.map(order => (
+                  <div key={order.id} className="flex items-center justify-between rounded-lg bg-white/50 px-3 py-2 dark:bg-indigo-900/20">
+                    <span className="text-xs font-medium text-slate-700 dark:text-indigo-200">
+                      {order.test_name} — {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(order.fee || 0)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handlePayNow(order.id)}
+                      disabled={paymentLoading === order.id}
+                      className="rounded px-3 py-1 text-xs font-semibold text-indigo-600 hover:bg-indigo-100 disabled:opacity-50 dark:text-indigo-400 dark:hover:bg-indigo-900/50"
+                    >
+                      {paymentLoading === order.id ? 'Processing...' : 'Pay Now'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {resultType === 'blood' && (
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mt-5 mb-5 flex flex-wrap items-center justify-between gap-3">
+        {/* Type toggle */}
+        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 dark:border-[#252530] dark:bg-[#111118]">
           {[
-            ['all', 'All'],
-            ['pending', 'Pending Results'],
-            ['ready', 'Results Ready'],
+            ['blood', 'Blood Tests'],
+            ['imaging', 'Imaging & Signals'],
           ].map(([key, label]) => {
-            const active = statusFilter === key
+            const active = resultType === key
             return (
               <button
                 key={key}
                 type="button"
-                className={`rounded-lg border px-4 py-1.5 text-sm font-medium transition-all ${active ? 'border-slate-900 bg-slate-900 text-white dark:border-[#eeeef5] dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-[#353545]'}`}
-                onClick={() => setStatusFilter(key)}
+                onClick={() => { setResultType(key); setSelectedImagingId(null); setImagingFilter('all') }}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${active ? 'bg-slate-900 text-white dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'text-slate-500 hover:text-slate-700 dark:text-[#70708a] dark:hover:text-[#c8c8e0]'}`}
               >
                 {label}
               </button>
             )
           })}
         </div>
-      )}
 
-      {resultType === 'blood' && (
-        <div className="mt-6 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-[#1c1c25]">
-          <div className="flex gap-2" role="tablist" aria-label="Lab result filters">
+        {/* Status filter — blood */}
+        {resultType === 'blood' && (
+          <div className="flex items-center gap-2" role="tablist" aria-label="Filter lab results">
             {[
               ['all', 'All'],
               ['new', 'New'],
               ['reviewed', 'Reviewed'],
+              ['pending', 'Pending'],
             ].map(([key, label]) => {
               const active = filter === key
               return (
                 <button
                   key={key}
                   type="button"
-                  className={`rounded-lg border px-4 py-1.5 text-sm font-medium transition-all ${active ? 'border-slate-900 bg-slate-900 text-white dark:border-[#eeeef5] dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-[#353545]'}`}
+                  className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium transition-all ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white dark:border-[#eeeef5] dark:bg-[#eeeef5] dark:text-[#0c0c13]'
+                      : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-[#353545]'
+                  }`}
                   onClick={() => setFilter(key)}
                 >
                   {label}
                 </button>
               )
             })}
+            <span className="ml-1 text-xs text-slate-400 dark:text-[#606070]">Newest first</span>
           </div>
+        )}
 
-          <span className="text-xs text-slate-400 dark:text-[#606070]">Newest first</span>
-        </div>
-      )}
+        {/* Risk filter — imaging */}
+        {resultType === 'imaging' && !selectedImaging && (
+          <div className="flex items-center gap-2" role="tablist" aria-label="Filter imaging results">
+            {[
+              ['all', 'All'],
+              ['low', 'Low Risk'],
+              ['medium', 'Medium Risk'],
+              ['high', 'High Risk'],
+            ].map(([key, label]) => {
+              const active = imagingFilter === key
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`rounded-lg border px-3.5 py-1.5 text-sm font-medium transition-all ${
+                    active
+                      ? 'border-slate-900 bg-slate-900 text-white dark:border-[#eeeef5] dark:bg-[#eeeef5] dark:text-[#0c0c13]'
+                      : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-[#353545]'
+                  }`}
+                  onClick={() => setImagingFilter(key)}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
 
       {resultType === 'blood' && (
         <div className="space-y-4">
-          {statusFilter !== 'ready' && pendingOrders.length > 0 && (
+          {filter !== 'reviewed' && filter !== 'new' && pendingOrders.length > 0 && (
             <section>
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#505060]">Pending Results</p>
 
@@ -354,6 +454,28 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
                 ))}
               </div>
             </section>
+          )}
+
+          {loading && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 dark:border-[#252530] dark:bg-[#111118]">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-indigo-600 dark:border-[#252530] dark:border-t-indigo-400" />
+              <p className="mt-3 text-sm text-slate-500 dark:text-[#70708a]">Loading your lab results...</p>
+            </div>
+          )}
+
+          {!loading && fetchError && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 py-12 dark:border-rose-900/40 dark:bg-rose-950/30">
+              <span className="text-2xl">⚠️</span>
+              <p className="mt-2 text-sm font-medium text-rose-700 dark:text-rose-300">{fetchError}</p>
+            </div>
+          )}
+
+          {!loading && !fetchError && visibleResults.length === 0 && pendingOrders.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 dark:border-[#252530] dark:bg-[#111118]">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-[#1c1c25] dark:text-[#505060]"><FlaskConicalIcon /></span>
+              <p className="mt-3 text-sm font-medium text-slate-500 dark:text-[#70708a]">No lab results yet</p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-[#606070]">Results will appear here once your doctor orders lab tests.</p>
+            </div>
           )}
 
           {visibleResults.map((lab) => {
@@ -411,13 +533,20 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
 
       {resultType === 'imaging' && !selectedImaging && (
         <div className="space-y-3">
-          {PATIENT_FRIENDLY_RESULTS.map((result) => {
+          {PATIENT_FRIENDLY_RESULTS.filter((r) => imagingFilter === 'all' || r.riskLevel === imagingFilter).map((result) => {
             const symbol = symbolForResult(result.icon)
             return (
               <button
                 key={result.id}
                 type="button"
-                onClick={() => setSelectedImagingId(result.id)}
+                onClick={() => {
+                  if (_passedSetSelectedLab) {
+                    _passedSetSelectedLab(mapImagingToSelectedLab(result))
+                    setCurrentView('lab-detail')
+                  } else {
+                    setSelectedImagingId(result.id)
+                  }
+                }}
                 className="card-hover w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:border-slate-300 dark:border-[#252530] dark:bg-[#111118] dark:shadow-none dark:hover:border-[#353545] dark:hover:bg-[#16161e]"
               >
                 <div className="flex items-start justify-between gap-4">
@@ -497,7 +626,14 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
 
           <button
             type="button"
-            onClick={() => setCurrentView('symptom-checker')}
+            onClick={() => {
+              if (_passedSetSelectedLab) {
+                _passedSetSelectedLab(mapImagingToSelectedLab(selectedImaging))
+                setCurrentView('lab-detail')
+              } else {
+                setCurrentView('symptom-checker')
+              }
+            }}
             className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
           >
             <span>Discuss with AI Assistant →</span>
@@ -506,9 +642,7 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
       )}
 
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg dark:border-emerald-900/40 dark:bg-emerald-950/40 dark:text-emerald-300">
-          {toastMessage}
-        </div>
+        <Toast message={toastMessage} onDismiss={() => setToastMessage('')} />
       )}
     </div>
   )

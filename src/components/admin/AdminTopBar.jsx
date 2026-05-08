@@ -17,6 +17,7 @@ const VIEW_LABELS = {
   dashboard: 'Dashboard',
   users: 'User Management',
   appointments: 'Appointment Management',
+  'payment-history': 'Payment History',
   reports: 'Reports & Analytics',
   settings: 'System Settings',
 }
@@ -61,9 +62,8 @@ export default function AdminTopBar({ currentView, navigateTo, setMobileOpen, us
   const { accentColor } = useAdminSettings()
   const badgeClass = getBadgeClass(accentColor)
   const currentLabel = VIEW_LABELS[currentView] || 'Admin Portal'
-
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
+    <header className="app-root sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
       <div className="flex flex-shrink-0 items-center gap-3">
         <button
           type="button"

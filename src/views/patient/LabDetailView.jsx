@@ -1,7 +1,13 @@
+import { useState, useRef } from 'react'
 import PropTypes from 'prop-types'
 import { IconArrowLeft, IconSparkle } from '../../icons'
 import { LAB_AI_ANALYSIS } from '../../data/aiAnalysis'
+import { AI_LAB_ANALYSIS } from '../../data/aiLabAnalysis'
 import AiRiskBadge from '../../components/shared/AiRiskBadge'
+import AiDisclaimer from '../../components/shared/AiDisclaimer'
+import { labChat, streamSSE } from '../../api/ai'
+import { emrApi } from '../../api/emr'
+import AiMessageContent from '../../components/shared/AiMessageContent'
 
 const DEFAULT_LAB = {
   id: 1,
@@ -112,12 +118,183 @@ function statusLabel(status) {
   return 'Normal'
 }
 
+function BotIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="8" width="18" height="12" rx="2" />
+      <path d="M12 4v4" />
+      <path d="M9 12h.01" />
+      <path d="M15 12h.01" />
+      <path d="M8 16h8" />
+    </svg>
+  )
+}
+
+function resolveAnalysisType(testName) {
+  const normalized = String(testName || '').toLowerCase()
+
+  const isBloodPanel = [
+    'blood',
+    'cbc',
+    'lipid',
+    'hba1c',
+    'cholesterol',
+    'hemoglobin',
+  ].some((token) => normalized.includes(token))
+
+  if (isBloodPanel) return 'blood'
+
+  const isEcg = ['ecg', 'electrocardiogram'].some((token) => normalized.includes(token))
+  if (isEcg) return 'ecg'
+
+  const isImaging = ['x-ray', 'ct', 'mri', 'imaging', 'scan', 'ultrasound'].some((token) => normalized.includes(token))
+  if (isImaging) return 'imaging'
+
+  return 'default'
+}
+
+function resolveAnalysisData(testName) {
+  const normalized = String(testName || '').toLowerCase()
+
+  if (normalized.includes('lipid')) return AI_LAB_ANALYSIS.lipid
+  if (normalized.includes('cbc') || normalized.includes('blood')) return AI_LAB_ANALYSIS.cbc
+  if (normalized.includes('ecg')) return AI_LAB_ANALYSIS.ecg
+  if (['x-ray', 'ct', 'mri', 'imaging', 'scan', 'ultrasound'].some((token) => normalized.includes(token))) {
+    return AI_LAB_ANALYSIS.imaging
+  }
+
+  return AI_LAB_ANALYSIS.default
+}
+
+function analysisStatusClass(status) {
+  if (status === 'normal') return 'la-status la-status--normal'
+  if (status === 'borderline') return 'la-status la-status--borderline'
+  return 'la-status la-status--abnormal'
+}
+
+function analysisStatusLabel(status) {
+  if (status === 'normal') return 'Normal'
+  if (status === 'borderline') return 'Borderline'
+  return 'Abnormal'
+}
+
 export default function LabResultDetailView({ setCurrentView, selectedLab }) {
   const lab = selectedLab || DEFAULT_LAB
   const isNew = lab.status === 'New'
-  const aiData = lab?.aiKey
-    ? LAB_AI_ANALYSIS[lab.aiKey]
-    : null
+
+  // Prefer real API data over static mock — static is only a fallback when API has nothing
+  const hasRealAiData = !!(lab?.published_text || lab?.ai_draft_text || lab?.aiSummary)
+  const staticAiData = !hasRealAiData && lab?.aiKey ? LAB_AI_ANALYSIS[lab.aiKey] : null
+
+  const resolveRiskLevel = (confidence) => {
+    if (confidence == null) return 'moderate'
+    if (confidence >= 0.8) return 'low'
+    if (confidence >= 0.5) return 'moderate'
+    return 'high'
+  }
+
+  // Build flags from published_findings / ai_visual_findings if available
+  const resolveRealFlags = () => {
+    const raw = lab?.published_findings || lab?.ai_visual_findings
+    const parsed = typeof raw === 'string'
+      ? (() => { try { return JSON.parse(raw) } catch { return [] } })()
+      : raw
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter(f => f.flag && f.flag !== 'normal' && f.flag !== 'N')
+      .map(f => {
+        const unitSuffix = f.unit ? ` ${f.unit}` : ''
+        const displayValue = f.value ? `${f.value}${unitSuffix}` : (f.severity || '-')
+        const hasRef = f.reference_low === undefined
+        const aiNote = hasRef
+          ? (f.region || f.location || '')
+          : `Ref: ${f.reference_low}–${f.reference_high} ${f.unit || ''}`.trim()
+        return {
+          marker: f.name || f.finding || 'Finding',
+          value: displayValue,
+          status: (f.flag === 'H' || f.flag === 'high') ? 'high' : 'low',
+          aiNote,
+        }
+      })
+  }
+
+  const aiData = staticAiData || (hasRealAiData ? {
+    riskLevel: resolveRiskLevel(lab.ai_confidence),
+    confidence: lab.ai_confidence == null ? null : Math.round(lab.ai_confidence * 100),
+    modelName: 'HealthAI',
+    modelType: 'Clinical Analysis',
+    dataset: 'EMR Pipeline',
+    flags: resolveRealFlags(),
+    recommendation: lab.aiSummary || lab.ai_draft_text || '',
+    disclaimer: 'This AI analysis is intended to assist clinical review and should not replace professional medical judgment.',
+  } : null)
+
+  const analysisType = resolveAnalysisType(lab.name)
+  const aiLabAnalysis = resolveAnalysisData(lab.name)
+
+  const [lcQuestion, setLcQuestion] = useState('')
+  const [lcLines, setLcLines] = useState([])
+  const [lcLoading, setLcLoading] = useState(false)
+  const lcAbortRef = useRef(null)
+  const lcSessionRef = useRef(null)  // persists session_id across turns
+  const lcInputRef = useRef(null)
+
+  const handleLabChat = async () => {
+    const q = lcQuestion.trim()
+    if (!q || lcLoading) return
+    setLcLoading(true)
+    setLcLines([])
+    lcAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    lcAbortRef.current = ctrl
+    let buf = ''
+    try {
+      const response = await labChat(
+        {
+          question: q,
+          patientId: lab?.patient_id || undefined,
+          sessionId: lcSessionRef.current || undefined,  // continue existing session
+        },
+        ctrl.signal
+      )
+      streamSSE(response, {
+        onEvent: (name, data) => {
+          // Capture session_id on first call to persist conversation history
+          if (name === 'session_id') lcSessionRef.current = data.trim()
+        },
+        onChunk: (chunk) => { buf += chunk; setLcLines(buf.split('\n')) },
+        onDone: () => setLcLoading(false),
+        onError: () => { if (!ctrl.signal.aborted) setLcLoading(false) },
+      })
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        setLcLines([err?.message || 'Failed to get AI answer.'])
+        setLcLoading(false)
+      }
+    }
+  }
+
+  const [pdfLoading, setPdfLoading] = useState(false)
+  const [pdfError, setPdfError] = useState('')
+
+  const isMockResult = !lab.id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(lab.id))
+
+  const handleDownloadPDF = async () => {
+    if (pdfLoading) return
+    setPdfError('')
+    if (isMockResult) {
+      setPdfError('PDF is not available for this sample result.')
+      return
+    }
+    setPdfLoading(true)
+    try {
+      await emrApi.downloadLabResultPDF(lab.id)
+    } catch (err) {
+      setPdfError(err?.message || 'Failed to download PDF. Please try again.')
+    } finally {
+      setPdfLoading(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -203,10 +380,12 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
           </div>
 
           <div className="border-t border-slate-100 px-6 pb-5 pt-3 dark:border-[#1c1c25]">
-            <div className="flex items-start gap-2">
-              <AlertTriangleIcon className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-slate-400 dark:text-[#606070]" />
-              <p className="text-[11px] leading-relaxed text-slate-400 dark:text-[#606070]">{aiData.disclaimer}</p>
-            </div>
+            <AiDisclaimer
+              text={aiData.disclaimer}
+              modelName={aiData.modelName}
+              dataset={aiData.dataset}
+              analyzedAt={aiData.confidence == null ? undefined : `Confidence ${aiData.confidence}%`}
+            />
           </div>
         </section>
       )}
@@ -260,12 +439,149 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
         </div>
       </section>
 
+      <section className="la-section" aria-labelledby="la-heading">
+        <div className="la-header">
+          <div className="la-title-wrap">
+            <span className="la-icon">
+              <BotIcon />
+            </span>
+            <h2 id="la-heading" className="la-title">AI Analysis</h2>
+          </div>
+          <span className="la-model-badge">{aiLabAnalysis.modelType}</span>
+        </div>
+
+        {analysisType === 'blood' && aiLabAnalysis.findings && (
+          <article className="la-card">
+            <p className="la-card-title">Blood Panel Insights</p>
+            <div className="la-table-wrap">
+              <table className="la-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                    <th>Reference Range</th>
+                    <th>Assessment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiLabAnalysis.findings.map((item) => (
+                    <tr key={item.name}>
+                      <td>{item.name}</td>
+                      <td>{item.value}</td>
+                      <td>{item.range}</td>
+                      <td>
+                        <span className={analysisStatusClass(item.status)}>{analysisStatusLabel(item.status)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="la-summary">{aiLabAnalysis.summary}</p>
+          </article>
+        )}
+
+        {(analysisType === 'ecg' || analysisType === 'imaging') && (
+          <article className="la-card">
+            <p className="la-card-title">AI Pattern Interpretation</p>
+            <p className="la-summary">{aiLabAnalysis.description}</p>
+
+            <div className="la-confidence-row">
+              <span className="la-confidence-label">Confidence</span>
+              <span className="la-confidence-value">{aiLabAnalysis.confidence}%</span>
+            </div>
+            <div className="la-confidence-track" aria-hidden="true">
+              <span className="la-confidence-fill" style={{ width: `${aiLabAnalysis.confidence}%` }} />
+            </div>
+
+            <p className="la-summary">{aiLabAnalysis.summary}</p>
+          </article>
+        )}
+
+        {analysisType === 'default' && (
+          <article className="la-card">
+            <p className="la-card-title">AI Summary</p>
+            <p className="la-summary">{aiLabAnalysis.summary}</p>
+          </article>
+        )}
+
+        <div className="la-disclaimer">
+          <AiDisclaimer
+            text="AI analysis is for reference only and does not replace a physician diagnosis."
+            modelName={aiLabAnalysis.modelType}
+            dataset={analysisType === 'blood' ? 'Structured Lab Panel' : 'Signals & Clinical Notes'}
+            analyzedAt={`Confidence ${aiLabAnalysis.confidence}%`}
+          />
+        </div>
+      </section>
+
+      <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white/70 backdrop-blur-xl dark:border-[#252530] dark:bg-[#111118]/80">
+        <div className="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4 dark:border-[#1c1c25]">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-indigo-50 dark:bg-indigo-950/60">
+            <span className="text-indigo-600 dark:text-indigo-400"><IconSparkle size={14} /></span>
+          </span>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">Ask AI about this result</h2>
+            <p className="mt-0.5 text-[11px] text-slate-400 dark:text-[#606070]">Lab Q&A · plain-language explanations</p>
+          </div>
+        </div>
+        <div className="px-6 py-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={lcQuestion}
+              onChange={(e) => setLcQuestion(e.target.value)}
+              ref={lcInputRef}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleLabChat() }}
+              placeholder="e.g. What does my WBC result mean?"
+              className="flex-1 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-300 dark:border-[#252530] dark:bg-[#16161e] dark:text-[#eeeef5] dark:placeholder:text-[#505060] dark:focus:border-indigo-700"
+            />
+            <button
+              type="button"
+              onClick={handleLabChat}
+              disabled={!lcQuestion.trim() || lcLoading}
+              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+            >
+              {lcLoading ? (
+                <span className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
+              ) : 'Ask'}
+            </button>
+          </div>
+          {lcLines.length > 0 && (
+            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 p-4 dark:border-[#1c1c25] dark:bg-[#16161e]">
+              <AiMessageContent text={lcLines.join('\n')} />
+            </div>
+          )}
+        </div>
+      </section>
+
       <div className="mt-8 flex flex-wrap gap-3">
-        <button type="button" className="rounded-xl border border-slate-200 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition-all duration-150 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.97] dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5]">
-          <span className="inline-flex items-center gap-2"><DownloadIcon />Download PDF</span>
+        <button
+          type="button"
+          onClick={handleDownloadPDF}
+          disabled={pdfLoading || isMockResult}
+          className="rounded-xl border border-slate-200 bg-transparent px-4 py-2.5 text-sm font-medium text-slate-600 transition-all duration-150 hover:bg-slate-50 hover:text-slate-900 active:scale-[0.97] dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <span className="inline-flex items-center gap-2">
+            {pdfLoading ? (
+              <span className="inline-flex h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-r-transparent" />
+            ) : (
+              <DownloadIcon />
+            )}
+            Download PDF
+          </span>
         </button>
 
-        <button type="button" className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)] active:scale-[0.97] dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)]" onClick={() => setCurrentView('symptom-checker')}>
+        {pdfError && (
+          <p className="w-full text-xs text-rose-500 dark:text-rose-400">{pdfError}</p>
+        )}
+
+        <button
+          type="button"
+          className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)] active:scale-[0.97] dark:bg-indigo-600 dark:hover:bg-indigo-500 dark:hover:shadow-[0_4px_16px_rgba(99,102,241,0.3)]"
+          onClick={() => { lcInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); lcInputRef.current?.focus() }}
+        >
           <span className="inline-flex items-center gap-2"><IconSparkle size={12} />Discuss with AI →</span>
         </button>
       </div>

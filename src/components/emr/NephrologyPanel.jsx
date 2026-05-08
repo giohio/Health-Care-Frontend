@@ -159,7 +159,7 @@ export default function NephrologyPanel({ data }) {
         analyzedAt={data.analyzedAt}
         modelName={data.modelName}
         dataset={data.dataset}
-        message={data.disclaimer}
+        text={data.disclaimer}
       />
     </section>
   );

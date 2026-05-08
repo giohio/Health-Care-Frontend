@@ -1,81 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import PropTypes from 'prop-types'
-
-function CalendarIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="4" width="18" height="17" rx="2" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  )
-}
-
-function FlaskConicalIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10 3h4" />
-      <path d="M10 3v6l-5.8 9.5a2 2 0 0 0 1.7 3h12.2a2 2 0 0 0 1.7-3L14 9V3" />
-      <path d="M8.5 13h7" />
-    </svg>
-  )
-}
-
-function ShieldAlertIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M12 3l7 3v6c0 4.7-2.8 7.9-7 9-4.2-1.1-7-4.3-7-9V6l7-3z" />
-      <line x1="12" y1="8" x2="12" y2="13" />
-      <circle cx="12" cy="16" r="1" />
-    </svg>
-  )
-}
-
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M15 17H5a2 2 0 0 1-2-2c0-1.3.8-2.3 1.8-3.3C5.7 10.9 6 9.8 6 8.6a6 6 0 1 1 12 0c0 1.2.3 2.3 1.2 3.1 1 .9 1.8 2 1.8 3.3a2 2 0 0 1-2 2h-4" />
-      <path d="M9.5 17a2.5 2.5 0 0 0 5 0" />
-    </svg>
-  )
-}
-
-function ArrowRightIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="5" y1="12" x2="19" y2="12" />
-      <polyline points="12 5 19 12 12 19" />
-    </svg>
-  )
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="20 6 9 17 4 12" />
-    </svg>
-  )
-}
-
-function CheckCheckIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="1 13 5 17 10 12" />
-      <polyline points="7 13 11 17 23 5" />
-    </svg>
-  )
-}
-
-function BellOffIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M10.6 3.1A6 6 0 0 1 18 8.6c0 1.2.3 2.3 1.2 3.1 1 .9 1.8 2 1.8 3.3a2 2 0 0 1-2 2h-8" />
-      <path d="M5.4 5.6A6 6 0 0 0 6 8.6c0 1.2-.3 2.3-1.2 3.1-1 .9-1.8 2-1.8 3.3a2 2 0 0 0 2 2h7" />
-      <line x1="2" y1="2" x2="22" y2="22" />
-    </svg>
-  )
-}
+import { notificationApi } from '../../api/notification'
+import { IconCalendar, IconFlask, IconShieldAlert, IconArrowRight, IconCheck, IconCheckCheck, IconBell } from '../../icons'
+import { EmptyState } from '../../components/shared/EmptyState'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -84,62 +11,43 @@ const FILTERS = [
   { key: 'lab', label: 'Lab Results' },
 ]
 
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: 1,
-    type: 'lab',
-    title: 'New Lab Result Available',
-    body: 'Your Full Blood Panel results from Mar 10 are ready. One value requires attention.',
-    time: '2 hours ago',
-    isRead: false,
-    navigateTo: 'lab-results',
-  },
-  {
-    id: 2,
-    type: 'lab',
-    title: 'New Lab Result Available',
-    body: 'Your Lipid Profile results from Mar 10 are ready. LDL levels are above recommended range.',
-    time: '2 hours ago',
-    isRead: false,
-    navigateTo: 'lab-results',
-  },
-  {
-    id: 3,
-    type: 'appointment',
-    title: 'Appointment Confirmed',
-    body: 'Your appointment with Dr. Sarah Chen on Mar 19 at 10:00 AM has been confirmed.',
-    time: 'Yesterday',
-    isRead: false,
-    navigateTo: 'appointments',
-  },
-  {
-    id: 4,
-    type: 'appointment',
-    title: 'Appointment Reminder',
-    body: 'Reminder: You have a consultation with Dr. Marcus Reid tomorrow at 2:30 PM.',
-    time: '2 days ago',
-    isRead: true,
-    navigateTo: 'appointments',
-  },
-  {
-    id: 5,
-    type: 'allergy',
-    title: 'Allergy Profile Updated',
-    body: 'Your allergy file has been reviewed and confirmed by Dr. Sarah Chen before your last visit.',
-    time: 'Mar 8, 2025',
-    isRead: true,
-    navigateTo: 'health-record',
-  },
-  {
-    id: 6,
-    type: 'general',
-    title: 'Welcome to HealthAI Portal',
-    body: 'Your patient profile is complete. You can now book appointments and view your health records.',
-    time: 'Mar 1, 2025',
-    isRead: true,
-    navigateTo: null,
-  },
-]
+function eventToType(eventType) {
+  if (!eventType) return 'general'
+  if (eventType.startsWith('appointment')) return 'appointment'
+  if (eventType.startsWith('lab')) return 'lab'
+  if (eventType.startsWith('payment')) return 'general'
+  return 'general'
+}
+
+function formatRelativeTime(isoString) {
+  if (!isoString) return ''
+  const parsed = Date.parse(isoString)
+  if (Number.isNaN(parsed)) return ''
+  const diff = (Date.now() - parsed) / 1000
+  if (diff < 60) return 'Just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hours ago`
+  if (diff < 172800) return 'Yesterday'
+  const d = new Date(isoString)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function mapApiNotification(n) {
+  const type = eventToType(n.event_type)
+  let navigateTo = null
+  if (type === 'appointment') navigateTo = 'appointments'
+  else if (type === 'lab') navigateTo = 'lab-results'
+
+  return {
+    id: n.id,
+    type,
+    title: n.title ?? n.event_type ?? 'Notification',
+    body: n.body ?? n.message ?? '',
+    time: formatRelativeTime(n.created_at),
+    isRead: n.is_read ?? !!n.read_at,
+    navigateTo,
+  }
+}
 
 function getActionLabel(type) {
   if (type === 'appointment') return 'View Appointment'
@@ -153,7 +61,7 @@ function getTypeVisuals(type, isRead) {
     return {
       container: `bg-indigo-50 dark:bg-indigo-950/60 ${isRead ? 'opacity-60' : ''}`,
       iconClass: 'text-indigo-600 dark:text-indigo-400',
-      icon: CalendarIcon,
+      icon: IconCalendar,
     }
   }
 
@@ -161,7 +69,7 @@ function getTypeVisuals(type, isRead) {
     return {
       container: `bg-amber-50 dark:bg-amber-950/50 ${isRead ? 'opacity-60' : ''}`,
       iconClass: 'text-amber-600 dark:text-amber-400',
-      icon: FlaskConicalIcon,
+      icon: IconFlask,
     }
   }
 
@@ -169,14 +77,14 @@ function getTypeVisuals(type, isRead) {
     return {
       container: `bg-rose-50 dark:bg-rose-950/40 ${isRead ? 'opacity-60' : ''}`,
       iconClass: 'text-rose-600 dark:text-rose-400',
-      icon: ShieldAlertIcon,
+      icon: IconShieldAlert,
     }
   }
 
   return {
     container: `bg-slate-100 dark:bg-[#1c1c25] ${isRead ? 'opacity-60' : ''}`,
     iconClass: 'text-slate-500 dark:text-[#70708a]',
-    icon: BellIcon,
+    icon: IconBell,
   }
 }
 
@@ -190,52 +98,62 @@ export default function NotificationsView({
   setBookingNotifications,
 }) {
   const [activeFilter, setActiveFilter] = useState('all')
-  const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS)
+  const [notifications, setNotifications] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await notificationApi.getAll(50, 0)
+      const list = Array.isArray(data) ? data : (data?.notifications ?? [])
+      setNotifications(list.map(mapApiNotification))
+    } catch {
+      setNotifications([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
 
   useEffect(() => {
     if (orderNotifications.length > 0) {
-      setNotifications((prev) => [
-        ...orderNotifications,
-        ...prev,
-      ])
+      setNotifications((prev) => [...orderNotifications.map(mapApiNotification), ...prev])
       setOrderNotifications([])
     }
   }, [orderNotifications, setOrderNotifications])
 
   useEffect(() => {
     if (bookingNotifications.length > 0) {
-      setNotifications((prev) => [
-        ...bookingNotifications,
-        ...prev,
-      ])
+      setNotifications((prev) => [...bookingNotifications.map(mapApiNotification), ...prev])
       setBookingNotifications([])
     }
   }, [bookingNotifications, setBookingNotifications])
 
-  const markAsRead = (id) => {
+  const markAsRead = async (id) => {
     const target = notifications.find((n) => n.id === id)
-
-    setNotifications((prev) => prev.map((n) => (
-      n.id === id ? { ...n, isRead: true } : n
-    )))
-
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)))
     if (target && !target.isRead) {
       setUnreadCount((prev) => Math.max(0, prev - 1))
+      try { await notificationApi.markRead(id) } catch { /* non-critical */ }
     }
   }
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })))
     setUnreadCount(0)
+    try { await notificationApi.markAllRead() } catch { /* non-critical */ }
   }
 
-  const filtered = useMemo(() => notifications.filter((n) => {
-    if (activeFilter === 'all') return true
-    if (activeFilter === 'unread') return !n.isRead
-    if (activeFilter === 'appointments') return n.type === 'appointment'
-    if (activeFilter === 'lab') return n.type === 'lab'
-    return true
-  }), [activeFilter, notifications])
+  const filtered = useMemo(() => {
+    return notifications.filter((n) => {
+      if (activeFilter === 'all') return true
+      if (activeFilter === 'unread') return !n.isRead
+      if (activeFilter === 'appointments') return n.type === 'appointment'
+      if (activeFilter === 'lab') return n.type === 'lab'
+      return true
+    })
+  }, [activeFilter, notifications])
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
@@ -251,7 +169,7 @@ export default function NotificationsView({
             ) : (
               <>
                 <span className="text-sm text-slate-500 dark:text-[#70708a]">All caught up</span>
-                <span className="inline-flex h-4 w-4 text-emerald-500"><CheckIcon /></span>
+                <span className="inline-flex h-4 w-4 text-emerald-500"><IconCheck /></span>
               </>
             )}
           </div>
@@ -267,6 +185,8 @@ export default function NotificationsView({
           </button>
         )}
       </div>
+
+      {loading && <div className="api-loading mt-8"><div className="api-skeleton" /><div className="api-skeleton api-skeleton--short" /></div>}
 
       <div className="mb-6 mt-8">
         <div className="flex flex-wrap items-center gap-2">
@@ -299,22 +219,13 @@ export default function NotificationsView({
         </div>
       </div>
 
-      {filtered.length === 0 ? (
-        <div className="py-20 text-center">
-          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 dark:bg-[#1c1c25]">
-            {activeFilter === 'unread' ? (
-              <span className="inline-flex h-6 w-6 text-emerald-500 dark:text-emerald-400"><CheckCheckIcon /></span>
-            ) : (
-              <span className="inline-flex h-6 w-6 text-slate-400 dark:text-[#606070]"><BellOffIcon /></span>
-            )}
-          </div>
-          <p className="mt-1 text-base font-semibold text-slate-700 dark:text-[#c8c8e0]">
-            {activeFilter === 'unread' ? "You're all caught up" : 'No notifications here'}
-          </p>
-          <p className="mt-1.5 text-sm text-slate-400 dark:text-[#606070]">
-            {activeFilter === 'unread' ? 'No unread notifications at this time.' : 'Nothing to show for this filter.'}
-          </p>
-        </div>
+      {!loading && filtered.length === 0 ? (
+        <EmptyState
+          icon={activeFilter === 'unread' ? <IconCheckCheck size={24} className="text-emerald-500 dark:text-emerald-400" /> : undefined}
+          iconEmoji={activeFilter === 'all' ? '🔔' : undefined}
+          title={activeFilter === 'unread' ? "You're all caught up" : 'No notifications here'}
+          description={activeFilter === 'unread' ? 'No unread notifications at this time.' : 'Nothing to show for this filter.'}
+        />
       ) : (
         <div className="flex flex-col gap-3">
           {filtered.map((notification, index) => {
@@ -323,10 +234,9 @@ export default function NotificationsView({
             const actionLabel = getActionLabel(notification.type)
 
             return (
-              <button
+              <article
                 key={notification.id}
-                type="button"
-                className={`relative w-full overflow-hidden rounded-2xl border px-5 py-4 text-left transition-all duration-300 card-hover view-enter ${
+                className={`relative overflow-hidden rounded-2xl border transition-all duration-300 card-hover view-enter ${
                   notification.isRead
                     ? 'border-slate-100 bg-white shadow-none dark:border-[#1c1c25] dark:bg-[#0e0e15]'
                     : 'border-slate-200 bg-white shadow-[0_2px_12px_rgba(99,102,241,0.06)] dark:border-[#252530] dark:bg-[#111118] dark:shadow-[0_2px_12px_rgba(99,102,241,0.1)]'
@@ -335,13 +245,20 @@ export default function NotificationsView({
                   animationDelay: `${Math.min(index * 50, 300)}ms`,
                   animationFillMode: 'both',
                 }}
-                onClick={() => {
-                  markAsRead(notification.id)
-                  if (notification.navigateTo) {
-                    setCurrentView(notification.navigateTo)
-                  }
-                }}
               >
+                {/* Full-card click target — sits behind content via z-index */}
+                <button
+                  type="button"
+                  aria-label={notification.title}
+                  className="absolute inset-0 z-0 w-full cursor-pointer"
+                  onClick={() => {
+                    markAsRead(notification.id)
+                    if (notification.navigateTo) setCurrentView(notification.navigateTo)
+                  }}
+                />
+
+                {/* Content layer above the button */}
+                <div className="relative z-10 px-5 py-4 text-left">
                 {!notification.isRead && (
                   <span className="absolute bottom-0 left-0 top-0 w-[3px] rounded-l-2xl bg-gradient-to-b from-indigo-500 to-violet-500 dark:from-indigo-400 dark:to-violet-400" aria-hidden="true" />
                 )}
@@ -381,13 +298,14 @@ export default function NotificationsView({
                           }}
                         >
                           <span>{actionLabel}</span>
-                          <span className="inline-flex h-3 w-3"><ArrowRightIcon /></span>
+                          <span className="inline-flex h-3 w-3"><IconArrowRight /></span>
                         </button>
                       </div>
                     )}
                   </div>
                 </div>
-              </button>
+              </div>
+              </article>
             )
           })}
         </div>

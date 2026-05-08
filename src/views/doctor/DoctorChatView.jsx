@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
+import { clinicalAssist, streamSSE } from '../../api/ai'
 
 function ChevronLeftIcon() {
   return (
@@ -228,35 +229,15 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
   const [copiedId, setCopiedId] = useState(null)
   const [feedbackById, setFeedbackById] = useState({})
   const messagesEndRef = useRef(null)
+  // Persistent session across turns so the AI has conversation history
+  const sessionRef = useRef(null)
+  const abortRef = useRef(null)
 
-  const activePatientName = selectedPatient?.name || 'Jane Doe'
-  const clinicianName = user?.name || 'Doctor'
+  const activePatientName = selectedPatient?.name || selectedPatient?.full_name || 'the patient'
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
-
-  const getAIResponse = (input) => {
-    const lower = input.toLowerCase()
-
-    if (lower.includes('summarize') || lower.includes('history')) {
-      return `Based on ${activePatientName}'s records, key points to note: She is a 36-year-old female with a history of iron deficiency (2024) and recurring migraines (neurology referral, Nov 2024). Critical allergy flags: Penicillin (anaphylaxis) and Seafood (hives). Current medications include Metformin and Lisinopril — ensure BP and glucose monitoring at today's visit.`
-    }
-
-    if (lower.includes('drug') || lower.includes('interaction')) {
-      return 'Reviewing Metformin + Lisinopril + Vitamin D3: No clinically significant interactions found between these three agents. Note: Lisinopril may cause hyperkalemia — monitor potassium if adding any new medications. Vitamin D3 has no interactions in this context. No contraindications with today\'s suspected viral URI diagnosis.'
-    }
-
-    if (lower.includes('lab') || lower.includes('cbc') || lower.includes('interpret')) {
-      return 'Interpreting the CBC: Hemoglobin at 11.2 g/dL is mildly below normal range (12.0-16.0 g/dL), consistent with mild anemia — likely iron deficiency given history. WBC 6.8 K/uL is within normal range, suggesting no acute bacterial infection. Platelets 245 K/uL normal. Clinical impression: mild iron deficiency anemia, no signs of infection on CBC alone. Recommend CRP to further rule out inflammation.'
-    }
-
-    if (lower.includes('icd') || lower.includes('code')) {
-      return 'Recommended ICD-10 codes for headache with low-grade fever: R51.9 Headache, unspecified; R50.9 Fever, unspecified; J06.9 Acute upper respiratory infection (if URI suspected). If migraine is confirmed: G43.909 Migraine, unspecified. Would you like me to add these to the current clinical note?'
-    }
-
-    return `I can help with patient summaries, drug interaction checks, lab result interpretation, ICD-10 lookups, and clinical guideline references. ${clinicianName}, what would you like to look into?`
-  }
 
   const getFollowUpChips = (input) => {
     const lower = input.toLowerCase()
@@ -267,45 +248,96 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
     return ['Summarize chart', 'Check interactions', 'Interpret labs', 'Find ICD codes']
   }
 
-  const sendMessage = (text) => {
-    if (!text.trim()) return
+  const sendMessage = useCallback(async (text) => {
+    if (!text.trim() || isTyping) return
     setShowSuggestions(false)
+
+    const trimmed = text.trim()
+    const doctorMsgId = `doctor-${Date.now()}`
+    const aiMsgId = `ai-${Date.now()}`
 
     setMessages((prev) => [
       ...prev,
-      {
-        id: Date.now(),
-        role: 'doctor',
-        text,
-        timestamp: 'Just now',
-      },
+      { id: doctorMsgId, role: 'doctor', text: trimmed, timestamp: 'Just now' },
     ])
-
     setInputValue('')
     setIsTyping(true)
 
-    window.setTimeout(() => {
-      setIsTyping(false)
+    // Cancel any in-flight request
+    abortRef.current?.abort()
+    abortRef.current = new AbortController()
+
+    try {
+      const response = await clinicalAssist(
+        {
+          question: trimmed,
+          patientId: selectedPatient?.id ?? undefined,
+          sessionId: sessionRef.current ?? undefined,
+        },
+        abortRef.current.signal,
+      )
+
+      // Seed an empty AI message that we'll stream into
+      setMessages((prev) => [
+        ...prev,
+        { id: aiMsgId, role: 'ai', text: '', timestamp: 'Just now', chips: [] },
+      ])
+
+      streamSSE(response, {
+        onEvent: (event, data) => {
+          if (event === 'session_id') sessionRef.current = data
+        },
+        onChunk: (chunk) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsgId ? { ...m, text: m.text + chunk } : m,
+            ),
+          )
+        },
+        onDone: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsgId ? { ...m, chips: getFollowUpChips(trimmed) } : m,
+            ),
+          )
+          setIsTyping(false)
+        },
+        onError: () => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === aiMsgId
+                ? { ...m, text: 'Clinical assistant encountered an error. Please try again.', chips: [] }
+                : m,
+            ),
+          )
+          setIsTyping(false)
+        },
+      })
+    } catch (err) {
+      if (err?.name === 'AbortError') return
       setMessages((prev) => [
         ...prev,
         {
-          id: Date.now() + 1,
+          id: aiMsgId,
           role: 'ai',
-          text: getAIResponse(text),
+          text: `Error: ${err.message || 'Could not reach clinical assistant.'}`,
           timestamp: 'Just now',
-          chips: getFollowUpChips(text),
+          chips: [],
         },
       ])
-    }, 1300)
-  }
+      setIsTyping(false)
+    }
+  }, [isTyping, selectedPatient])
 
   const copyMessage = (id, text) => {
-    navigator.clipboard.writeText(text).catch(() => {})
+    globalThis.navigator.clipboard.writeText(text).catch(() => {})
     setCopiedId(id)
-    window.setTimeout(() => setCopiedId(null), 2000)
+    globalThis.setTimeout(() => setCopiedId(null), 2000)
   }
 
   const clearConversation = () => {
+    abortRef.current?.abort()
+    sessionRef.current = null
     setMessages([INITIAL_MESSAGE])
     setShowSuggestions(true)
     setIsTyping(false)
@@ -323,43 +355,20 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
   const regenerateResponse = () => {
     const lastDoctor = [...messages].reverse().find((m) => m.role === 'doctor')
     if (!lastDoctor) return
-
+    // Remove last AI message and re-send the last doctor prompt
     setMessages((prev) => {
-      let aiIndex = -1
-      for (let i = prev.length - 1; i >= 0; i -= 1) {
-        if (prev[i].role === 'ai') {
-          aiIndex = i
-          break
-        }
-      }
-      if (aiIndex < 0) return prev
-      return prev.filter((_, idx) => idx !== aiIndex)
+      const idx = [...prev].reverse().findIndex((m) => m.role === 'ai')
+      if (idx === -1) return prev
+      const realIdx = prev.length - 1 - idx
+      return prev.filter((_, i) => i !== realIdx)
     })
-
-    setIsTyping(true)
-    window.setTimeout(() => {
-      const variations = [
-        'Would you like a concise version for chart documentation?',
-        'I can also reframe this in SOAP format for your note.',
-        'I can map this directly to suggested ICD-10 codes if needed.',
-      ]
-      const variation = variations[Math.floor(Math.random() * variations.length)]
-
-      setIsTyping(false)
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Date.now() + 1,
-          role: 'ai',
-          text: `${getAIResponse(lastDoctor.text)} ${variation}`,
-          timestamp: 'Just now',
-          chips: getFollowUpChips(lastDoctor.text),
-        },
-      ])
-    }, 1300)
+    sendMessage(lastDoctor.text)
   }
 
   const aiMessageCount = messages.filter((m) => m.role === 'ai').length
+  const hasVisibleAiContent = messages.some(
+    (m) => m.role === 'ai' && (m.text || '').trim().length > 0,
+  )
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
@@ -470,6 +479,11 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
                 )
               }
 
+              // Do not render an empty AI shell message while waiting for SSE chunks.
+              if (message.role === 'ai' && !(message.text || '').trim() && !(Array.isArray(message.chips) && message.chips.length > 0)) {
+                return null
+              }
+
               return (
                 <div key={message.id} className="flex justify-start">
                   <div className="flex min-w-0 items-start gap-3">
@@ -577,7 +591,7 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
               </div>
             )}
 
-            {isTyping && (
+            {isTyping && !hasVisibleAiContent && (
               <div className="flex items-start gap-3">
                 <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-violet-600 text-white shadow-[0_2px_8px_rgba(99,102,241,0.3)]">
                   <span className="inline-flex h-4 w-4"><SparklesIcon /></span>
@@ -657,10 +671,13 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
 DoctorChatView.propTypes = {
   navigateTo: PropTypes.func.isRequired,
   selectedPatient: PropTypes.shape({
+    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
     name: PropTypes.string,
+    full_name: PropTypes.string,
   }),
   user: PropTypes.shape({
     name: PropTypes.string,
+    full_name: PropTypes.string,
     initials: PropTypes.string,
     specialty: PropTypes.string,
   }),

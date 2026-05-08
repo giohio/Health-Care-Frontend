@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
+import { authApi } from '../../api/auth'
 
 function StethoscopeIcon() {
   return (
@@ -83,25 +84,41 @@ function MoonIcon() {
   )
 }
 
-export default function LoginView({ dark, setDark, onLogin }) {
+export default function LoginView({ dark, setDark, onLogin, onSignupClick, onNeedVerify, onForgotPassword }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [needsVerification, setNeedsVerification] = useState(false)
 
   const handleSubmit = async () => {
     if (!email || !password || isLoading) return
 
     setIsLoading(true)
     setError('')
-    await new Promise((r) => globalThis.setTimeout(r, 800))
-
-    const result = onLogin(email, password)
-    if (!result.success) {
-      setError(result.error)
+    setNeedsVerification(false)
+    try {
+      const data = await authApi.login(email, password)
+      // data.user has: { id, email, role, is_active, is_profile_completed }
+      // Token is set as HttpOnly cookie automatically by server
+      onLogin(data.user)
+    } catch (err) {
+      const msg = err.message || 'Invalid email or password'
+      setError(msg)
+      setNeedsVerification(msg.toLowerCase().includes('email not verified'))
       setIsLoading(false)
     }
+  }
+
+  const handleVerifyAgain = async () => {
+    if (!email) return
+    try {
+      await authApi.resendOtp(email)
+    } catch {
+      // Keep generic UX and still send user to OTP page to retry from there.
+    }
+    if (onNeedVerify) onNeedVerify(email)
   }
 
   return (
@@ -189,6 +206,26 @@ export default function LoginView({ dark, setDark, onLogin }) {
           </div>
         )}
 
+        {needsVerification && (
+          <button
+            type="button"
+            className="mt-2 text-sm font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+            onClick={handleVerifyAgain}
+          >
+            Verify email now
+          </button>
+        )}
+
+        <div className="mt-2 text-right">
+          <button
+            type="button"
+            className="text-sm font-medium text-slate-500 hover:text-indigo-600 hover:underline dark:text-[#9898b0] dark:hover:text-indigo-400"
+            onClick={() => onForgotPassword && onForgotPassword(email)}
+          >
+            Forgot password?
+          </button>
+        </div>
+
         <button
           type="button"
           className="mt-5 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_4px_12px_rgba(99,102,241,0.4)] disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-600 dark:hover:bg-indigo-500"
@@ -212,8 +249,8 @@ export default function LoginView({ dark, setDark, onLogin }) {
               type="button"
               className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2.5 text-xs font-medium text-slate-600 transition-all duration-150 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-600 dark:border-[#252530] dark:text-[#9898b0] dark:hover:border-indigo-700 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-400"
               onClick={() => {
-                setEmail('jane.doe@email.com')
-                setPassword('patient123')
+                setEmail('patient.le.thi.mai@healthai.dev')
+                setPassword('Patient123!')
                 setError('')
               }}
             >
@@ -225,8 +262,8 @@ export default function LoginView({ dark, setDark, onLogin }) {
               type="button"
               className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2.5 text-xs font-medium text-slate-600 transition-all duration-150 hover:border-teal-300 hover:bg-teal-50 hover:text-teal-600 dark:border-[#252530] dark:text-[#9898b0] dark:hover:border-teal-700 dark:hover:bg-teal-950/40 dark:hover:text-teal-400"
               onClick={() => {
-                setEmail('dr.chen@healthai.vn')
-                setPassword('doctor123')
+                setEmail('dr.nguyen.van.an@healthai.dev')
+                setPassword('Doctor123!')
                 setError('')
               }}
             >
@@ -238,8 +275,8 @@ export default function LoginView({ dark, setDark, onLogin }) {
               type="button"
               className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 py-2.5 text-xs font-medium text-slate-600 transition-all duration-150 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600 dark:border-[#252530] dark:text-[#9898b0] dark:hover:border-rose-700 dark:hover:bg-rose-950/40 dark:hover:text-rose-400"
               onClick={() => {
-                setEmail('admin@healthai.vn')
-                setPassword('admin123')
+                setEmail('admin@healthai.dev')
+                setPassword('Admin123!')
                 setError('')
               }}
             >
@@ -247,6 +284,20 @@ export default function LoginView({ dark, setDark, onLogin }) {
               <span>Admin Demo</span>
             </button>
           </div>
+
+          {/* Sign-up link */}
+          {onSignupClick && (
+            <div className="mt-5 text-center text-sm text-slate-500 dark:text-[#9898b0]">
+              Don&apos;t have an account?{' '}
+              <button
+                type="button"
+                className="font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                onClick={onSignupClick}
+              >
+                Sign up
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -257,4 +308,7 @@ LoginView.propTypes = {
   dark: PropTypes.bool.isRequired,
   setDark: PropTypes.func.isRequired,
   onLogin: PropTypes.func.isRequired,
+  onSignupClick: PropTypes.func,
+  onNeedVerify: PropTypes.func,
+  onForgotPassword: PropTypes.func,
 }

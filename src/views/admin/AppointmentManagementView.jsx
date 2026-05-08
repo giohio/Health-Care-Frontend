@@ -1,210 +1,34 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
+import { appointmentApi } from '../../api/appointment'
+import { authApi } from '../../api/auth'
 
-const TABS = [
-  { key: 'today', label: 'Today', count: 24 },
-  { key: 'week', label: 'This Week', count: 87 },
-  { key: 'all', label: 'All', count: 342 },
-  { key: 'cancelled', label: 'Cancelled', count: 12 },
+const AVATAR_GRADIENTS = [
+  'from-indigo-500 to-blue-400',
+  'from-teal-500 to-cyan-400',
+  'from-rose-500 to-fuchsia-400',
+  'from-amber-500 to-orange-400',
+  'from-emerald-500 to-teal-400',
+  'from-violet-500 to-indigo-400',
+  'from-sky-500 to-blue-400',
+  'from-fuchsia-500 to-rose-400',
+  'from-cyan-500 to-teal-400',
+  'from-slate-500 to-gray-400',
 ]
 
-const APPOINTMENTS = [
-  {
-    id: 'APT-001',
-    time: '08:30',
-    patient: 'Morning Rounds',
-    patientInitials: 'MR',
-    patientAvatar: 'from-slate-500 to-gray-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'ward-visit',
-    status: 'completed',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-002',
-    time: '10:00',
-    patient: 'Jane Doe',
-    patientInitials: 'JD',
-    patientAvatar: 'from-indigo-500 to-blue-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'consultation',
-    status: 'completed',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-003',
-    time: '10:30',
-    patient: 'Minh Tran',
-    patientInitials: 'MT',
-    patientAvatar: 'from-teal-500 to-cyan-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'follow-up',
-    status: 'in-progress',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-004',
-    time: '11:00',
-    patient: 'Linh Pham',
-    patientInitials: 'LP',
-    patientAvatar: 'from-rose-500 to-fuchsia-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'first-visit',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-005',
-    time: '11:30',
-    patient: 'Nam Nguyen',
-    patientInitials: 'NN',
-    patientAvatar: 'from-slate-500 to-slate-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'chronic-review',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-006',
-    time: '12:00',
-    patient: 'Lunch Break',
-    patientInitials: 'LB',
-    patientAvatar: 'from-amber-500 to-orange-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'break',
-    status: 'completed',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-007',
-    time: '13:00',
-    patient: 'Thu Le',
-    patientInitials: 'TL',
-    patientAvatar: 'from-emerald-500 to-teal-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'vaccination',
-    status: 'completed',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-008',
-    time: '13:30',
-    patient: 'Bao Nguyen',
-    patientInitials: 'BN',
-    patientAvatar: 'from-amber-500 to-orange-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'lab-review',
-    status: 'completed',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-009',
-    time: '14:00',
-    patient: 'Mai Thi',
-    patientInitials: 'MT',
-    patientAvatar: 'from-violet-500 to-indigo-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'follow-up',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-010',
-    time: '14:30',
-    patient: 'Duc Pham',
-    patientInitials: 'DP',
-    patientAvatar: 'from-sky-500 to-blue-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'chronic-review',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-011',
-    time: '15:00',
-    patient: 'Tran Van A',
-    patientInitials: 'TA',
-    patientAvatar: 'from-cyan-500 to-teal-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'general',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-012',
-    time: '15:30',
-    patient: 'Le Thi B',
-    patientInitials: 'LB',
-    patientAvatar: 'from-rose-500 to-orange-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'first-visit',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-013',
-    time: '16:00',
-    patient: 'Pham Van C',
-    patientInitials: 'PC',
-    patientAvatar: 'from-emerald-500 to-lime-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'follow-up',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-014',
-    time: '16:30',
-    patient: 'Nguyen Thi D',
-    patientInitials: 'ND',
-    patientAvatar: 'from-fuchsia-500 to-rose-400',
-    doctor: 'Dr. Reid',
-    doctorInitials: 'MR',
-    doctorAvatar: 'from-indigo-500 to-violet-400',
-    type: 'vaccination',
-    status: 'scheduled',
-    date: '2025-03-19',
-  },
-  {
-    id: 'APT-015',
-    time: '17:00',
-    patient: 'Bui Van E',
-    patientInitials: 'BE',
-    patientAvatar: 'from-slate-500 to-gray-400',
-    doctor: 'Dr. Chen',
-    doctorInitials: 'SC',
-    doctorAvatar: 'from-teal-500 to-cyan-400',
-    type: 'general',
-    status: 'cancelled',
-    date: '2025-03-19',
-  },
-]
+function pickGradient(str) {
+  let h = 0
+  for (let i = 0; i < (str || '').length; i++) h = Math.trunc((h << 5) - h + str.codePointAt(i))
+  return AVATAR_GRADIENTS[Math.abs(h) % AVATAR_GRADIENTS.length]
+}
+
+function getInitials(name) {
+  if (!name) return '?'
+  return name.split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
+}
+
+
+
 
 function DownloadIcon() {
   return (
@@ -358,12 +182,108 @@ export default function AppointmentManagementView({ navigateTo, user }) {
   const [statusFilter, setStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
 
+  const [appointments, setAppointments] = useState([])
+  const [doctorNames, setDoctorNames] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({ scheduled: null, completed: null, inProgress: null, cancelled: null })
+
+  const todayIso = new Date().toISOString().slice(0, 10)
+
+  useEffect(() => {
+    async function loadAll() {
+      setLoading(true)
+      try {
+        const statsP = appointmentApi.getAdminStats({ range: 'today' }).catch(() => null)
+
+        // Fetch users to build an ID-to-Name map (API limits to 100 max)
+        const usersP = authApi.getUsers({ limit: 100 }).catch(() => null)
+
+        const rangeMap = { today: 'today', 'this-week': 'week', cancelled: 'month' }
+        const apiRange = rangeMap[activeTab] || 'month'
+
+        const res = await appointmentApi.getAdminAppointments({
+          range: apiRange,
+          page: currentPage,
+          limit: 50,
+        }).catch(() => null)
+
+        const usersData = await usersP
+        const usersList = usersData?.data?.users || usersData?.users || (Array.isArray(usersData) ? usersData : [])
+        const userMap = {}
+        usersList.forEach(u => {
+          userMap[u.id] = u.full_name || u.email?.split('@')[0] || 'User'
+        })
+
+        if (res?.appointments) {
+          const mapped = res.appointments.map((a) => {
+            const patName = a.patient_name || userMap[a.patient_id] || a.patient_id
+            const docName = a.doctor_name || (userMap[a.doctor_id] ? `Dr. ${userMap[a.doctor_id].split(/\s+/).pop()}` : a.doctor_id)
+            return {
+              id: a.id,
+              patient: patName,
+              doctor: docName,
+              specialty_name: null,
+              status: (a.status || '').toLowerCase().replaceAll('_', '-'),
+              date: a.appointment_date,
+              time: a.start_time ? a.start_time.slice(0, 5) : '',
+              patientInitials: getInitials(patName),
+              patientAvatar: pickGradient(patName),
+              doctorInitials: getInitials(docName),
+              doctorAvatar: pickGradient(docName),
+              type: (a.appointment_type || 'general').toLowerCase().replaceAll(/\s+/g, '-'),
+            }
+          })
+          setAppointments(mapped)
+          
+          const uniqueDocs = [...new Set(mapped.map(a => a.doctor))].filter(Boolean)
+          setDoctorNames(uniqueDocs)
+        } else {
+          setAppointments([])
+          setDoctorNames([])
+        }
+
+        const sData = await statsP
+        if (sData) {
+          setStats({
+            scheduled: sData.waiting ?? null,
+            completed: sData.completed ?? null,
+            inProgress: sData.in_progress ?? null,
+            cancelled: null,
+          })
+        }
+      } catch { /* keep empty */ } finally {
+        setLoading(false)
+      }
+    }
+    loadAll()
+  }, [activeTab, currentPage])
+
+  const handleCancel = useCallback(async (aptId) => {
+    try {
+      await appointmentApi.cancel(aptId, 'Cancelled by admin')
+      setAppointments((prev) =>
+        prev.map((a) => (a.id === aptId ? { ...a, status: 'cancelled' } : a))
+      )
+    } catch {
+      // silent — row stays as-is
+    }
+  }, [])
+
   const filteredAppointments = useMemo(() => {
-    let result = APPOINTMENTS
+    let result = appointments
 
     if (activeTab !== 'all') {
       if (activeTab === 'today') {
-        result = result.filter((apt) => apt.date === '2025-03-19')
+        result = result.filter((apt) => apt.date === todayIso)
+      } else if (activeTab === 'week') {
+        const now = new Date()
+        const startOfWeek = new Date(now)
+        startOfWeek.setDate(now.getDate() - now.getDay() + 1) // Monday
+        const endOfWeek = new Date(startOfWeek)
+        endOfWeek.setDate(startOfWeek.getDate() + 6) // Sunday
+        const ws = startOfWeek.toISOString().slice(0, 10)
+        const we = endOfWeek.toISOString().slice(0, 10)
+        result = result.filter((apt) => apt.date >= ws && apt.date <= we)
       } else if (activeTab === 'cancelled') {
         result = result.filter((apt) => apt.status === 'cancelled')
       }
@@ -391,7 +311,7 @@ export default function AppointmentManagementView({ navigateTo, user }) {
     }
 
     return result
-  }, [activeTab, searchQuery, doctorFilter, typeFilter, statusFilter])
+  }, [appointments, activeTab, searchQuery, doctorFilter, typeFilter, statusFilter, todayIso])
 
   const itemsPerPage = 15
   const totalPages = Math.ceil(filteredAppointments.length / itemsPerPage)
@@ -399,6 +319,23 @@ export default function AppointmentManagementView({ navigateTo, user }) {
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   )
+
+  const tabs = useMemo(() => {
+    const now = new Date()
+    const startOfWeek = new Date(now)
+    startOfWeek.setDate(now.getDate() - now.getDay() + 1)
+    const endOfWeek = new Date(startOfWeek)
+    endOfWeek.setDate(startOfWeek.getDate() + 6)
+    const ws = startOfWeek.toISOString().slice(0, 10)
+    const we = endOfWeek.toISOString().slice(0, 10)
+
+    return [
+      { key: 'today', label: 'Today', count: appointments.filter((a) => a.date === todayIso).length },
+      { key: 'week', label: 'This Week', count: appointments.filter((a) => a.date >= ws && a.date <= we).length },
+      { key: 'all', label: 'All', count: appointments.length },
+      { key: 'cancelled', label: 'Cancelled', count: appointments.filter((a) => a.status === 'cancelled').length },
+    ]
+  }, [appointments, todayIso])
 
   return (
     <>
@@ -439,7 +376,7 @@ export default function AppointmentManagementView({ navigateTo, user }) {
             Scheduled
           </p>
           <p className="mt-2 text-2xl font-bold text-indigo-600 dark:text-indigo-400">
-            16
+            {stats.scheduled ?? (loading ? '…' : 0)}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#252530] dark:bg-[#111118]">
@@ -447,7 +384,7 @@ export default function AppointmentManagementView({ navigateTo, user }) {
             Completed
           </p>
           <p className="mt-2 text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            5
+            {stats.completed ?? (loading ? '…' : 0)}
           </p>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#252530] dark:bg-[#111118]">
@@ -456,7 +393,7 @@ export default function AppointmentManagementView({ navigateTo, user }) {
           </p>
           <div className="mt-2 flex items-center gap-2">
             <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
-              2
+              {stats.inProgress ?? (loading ? '…' : 0)}
             </p>
             <span className="inline-flex h-2 w-2 rounded-full bg-amber-500 animate-pulse dark:bg-amber-400" />
           </div>
@@ -466,14 +403,14 @@ export default function AppointmentManagementView({ navigateTo, user }) {
             Cancelled
           </p>
           <p className="mt-2 text-2xl font-bold text-rose-600 dark:text-rose-400">
-            1
+            {stats.cancelled ?? (loading ? '…' : 0)}
           </p>
         </div>
       </div>
 
       {/* TABS */}
       <div className="mb-6 flex gap-2 overflow-x-auto">
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => {
@@ -527,8 +464,9 @@ export default function AppointmentManagementView({ navigateTo, user }) {
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition-colors hover:border-slate-300 dark:border-[#252530] dark:bg-[#111118] dark:text-[#c8c8e0] dark:hover:border-[#353545]"
         >
           <option value="all">All Doctors</option>
-          <option value="Dr. Chen">Dr. Chen</option>
-          <option value="Dr. Reid">Dr. Reid</option>
+          {doctorNames.map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
         </select>
 
         <select
@@ -588,6 +526,16 @@ export default function AppointmentManagementView({ navigateTo, user }) {
         </div>
 
         <div className="divide-y divide-slate-100 dark:divide-[#1c1c25]">
+          {loading && (
+            <div className="flex items-center justify-center py-12">
+              <p className="text-sm text-slate-400 dark:text-[#606070]">Loading appointments…</p>
+            </div>
+          )}
+          {!loading && displayedAppointments.length === 0 && (
+            <div className="flex items-center justify-center py-12">
+              <p className="text-sm text-slate-400 dark:text-[#606070]">No appointments found</p>
+            </div>
+          )}
           {displayedAppointments.map((apt) => (
             <div
               key={apt.id}
@@ -657,7 +605,7 @@ export default function AppointmentManagementView({ navigateTo, user }) {
                 {apt.status === 'scheduled' && (
                   <button
                     type="button"
-                    onClick={() => navigateTo('appointments/' + apt.id + '/cancel')}
+                    onClick={() => handleCancel(apt.id)}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-all duration-150 hover:bg-rose-100 hover:text-rose-500 dark:text-[#70708a] dark:hover:bg-rose-950/30 dark:hover:text-rose-500"
                   >
                     <XIcon className="w-4 h-4" />

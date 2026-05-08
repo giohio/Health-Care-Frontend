@@ -104,6 +104,14 @@ function gradeLabelClass(active, gradeColor) {
 }
 
 export default function OphthalmologyPanel({ data }) {
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <p className="text-sm font-medium text-slate-500 dark:text-[#70708a]">No ophthalmology data available</p>
+        <p className="mt-1 text-xs text-slate-400 dark:text-[#505060]">Order a retinal scan to view results here.</p>
+      </div>
+    )
+  }
   const badge = resultBadge(data.drGrade, data.confidence)
   const grades = [0, 1, 2, 3, 4]
 

@@ -3,11 +3,15 @@ import './index.css'
 
 import { authApi } from './api/auth'
 import { patientApi } from './api/patient'
+import { clearAccessToken, initializeToken } from './api/client'
 import { connectWebSocket } from './api/websocket'
+import { notificationApi } from './api/notification'
 
 import LoginView from './views/auth/LoginView'
 import LandingPage from './views/LandingPage'
 import SignupView from './views/auth/SignupView'
+import OtpVerifyView from './views/auth/OtpVerifyView'
+import ResetPasswordView from './views/auth/ResetPasswordView'
 
 import PatientDashboardView from './views/patient/DashboardView'
 import SymptomCheckerView from './views/patient/SymptomCheckerView'
@@ -23,20 +27,25 @@ import NotificationsView from './views/patient/NotificationsView'
 import ProfileSetupView from './views/patient/ProfileSetupView'
 import PaymentReturnView from './views/patient/PaymentReturnView'
 import DoctorRatingView from './views/patient/DoctorRatingView'
+import PatientPaymentHistoryView from './views/patient/PaymentHistoryView'
+import TriageHistoryView from './views/patient/TriageHistoryView'
 
 import DoctorDashboardView from './views/doctor/DoctorDashboardView'
+import DoctorBoard from './views/doctor/DoctorBoard'
 import PatientQueueView from './views/doctor/PatientQueueView'
 import ScheduleView from './views/doctor/ScheduleView'
-import EMRWorkspaceView from './views/doctor/EMRWorkspaceView'
+import EMRWorkspace from './views/doctor/emr/EMRWorkspace'
 import DoctorChatView from './views/doctor/DoctorChatView'
 import LabResultReviewView from './views/doctor/LabResultReviewView'
 import DoctorProfileView from './views/doctor/DoctorProfileView'
+import TriageQueueView from './views/doctor/TriageQueueView'
 
 import AdminDashboardView from './views/admin/AdminDashboardView'
 import UserManagementView from './views/admin/UserManagementView'
 import AppointmentManagementView from './views/admin/AppointmentManagementView'
 import ReportsView from './views/admin/ReportsView'
 import SystemConfigView from './views/admin/SystemConfigView'
+import AdminPaymentHistoryView from './views/admin/PaymentHistoryView'
 
 import PatientSideNav from './components/patient/PatientSideNav'
 import PatientTopBar from './components/patient/PatientTopBar'
@@ -70,6 +79,7 @@ function deriveUserMeta(user) {
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null)
   const [authPage, setAuthPage] = useState('landing')
+  const [pendingEmail, setPendingEmail] = useState('')
   const [appReady, setAppReady] = useState(false)
   const [paymentReturn, setPaymentReturn] = useState(() => {
     const params = new URLSearchParams(globalThis.location.search)
@@ -80,19 +90,22 @@ export default function App() {
     return { status, txnRef }
   })
 
-  const [dark, setDark] = useState(false)
+  const [dark, setDark] = useState(() => localStorage.getItem('healthai-theme') === 'dark')
   const [isTransitioning, setIsTransitioning] = useState(false)
 
   const [patientView, setPatientView] = useState('dashboard')
+  const [patientViewData, setPatientViewData] = useState(null)
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [selectedLab, setSelectedLab] = useState(null)
-  const [unreadCount, setUnreadCount] = useState(3)
+  const [unreadCount, setUnreadCount] = useState(0)
   const [patientNavExpanded, setPatientNavExpanded] = useState(true)
   const [patientMobileOpen, setPatientMobileOpen] = useState(false)
 
   const [doctorView, setDoctorView] = useState('dashboard')
-  const [selectedPatient, setSelectedPatient] = useState(null)
+  // NOTE: renamed from selectedPatient to avoid collision with patient role's selectedAppointment
+  const [selectedDoctorPatient, setSelectedDoctorPatient] = useState(null)
   const [doctorEmrTab, setDoctorEmrTab] = useState(null)
+  const [triageInitialId, setTriageInitialId] = useState(null)
   const [doctorNavExpanded, setDoctorNavExpanded] = useState(true)
   const [doctorMobileOpen, setDoctorMobileOpen] = useState(false)
 
@@ -131,9 +144,10 @@ export default function App() {
     setAdminNavExpanded(size !== 'collapsed')
   }
 
-  // Hydrate currentUser from existing cookie on app init
+  // Hydrate in-memory access token first, then fetch current user
   useEffect(() => {
-    authApi.me()
+    initializeToken()
+      .then(() => authApi.me())
       .then(async (user) => {
         if (user?.role === 'patient') {
           try {
@@ -154,20 +168,38 @@ export default function App() {
   // Connect WebSocket after login, disconnect on logout
   useEffect(() => {
     if (!currentUser) return undefined
-    const disconnect = connectWebSocket(currentUser.id, (notification) => {
+
+    // Fetch real unread count from the API immediately after login
+    notificationApi.getUnreadCount()
+      .then((data) => setUnreadCount(data?.count ?? 0))
+      .catch(() => {})
+
+    const disconnect = connectWebSocket(currentUser.id, (message) => {
+      // WS messages are wrapped: { event: string, data: {...} }
+      // Only process new notification events; ignore "connected", "pong", etc.
+      if (message?.event !== 'notification.new' || !message?.data) return
+      const notification = message.data
       setUnreadCount((c) => c + 1)
       setOrderNotifications((prev) => [notification, ...prev])
+
+      // Patient: show alert when their appointment is created via AI Triage
+      if (notification?.event_type === 'appointment.created_patient' && currentUser.role === 'patient') {
+        globalThis.alert(
+          `${notification.title || 'Booking successful!'}\n${notification.body || 'Your appointment is ready.'}`
+        )
+      }
     })
     return disconnect
   }, [currentUser])
 
   const handleLogout = () => {
+    clearAccessToken()
     authApi.logout().catch(() => {})
     setCurrentUser(null)
     setPatientView('dashboard')
     setDoctorView('dashboard')
     setAdminView('dashboard')
-    setSelectedPatient(null)
+    setSelectedDoctorPatient(null)
     setSelectedAppointment(null)
     setSelectedLab(null)
     setDoctorEmrTab(null)
@@ -181,13 +213,14 @@ export default function App() {
     const onForceLogout = () => handleLogout()
     globalThis.addEventListener('auth:logout-required', onForceLogout)
     return () => globalThis.removeEventListener('auth:logout-required', onForceLogout)
-  })
+  }, [])
 
-  const navigatePatient = (view) => {
-    if (view === patientView) return
+  const navigatePatient = (view, data) => {
+    if (view === patientView && !data) return
     setIsTransitioning(true)
     globalThis.setTimeout(() => {
       setPatientView(view)
+      setPatientViewData(data ?? null)
       setIsTransitioning(false)
     }, 180)
   }
@@ -201,40 +234,7 @@ export default function App() {
     }, 180)
   }
 
-  const addOrderNotification = (order, type) => {
-    const notifMap = {
-      submitted: {
-        type: 'appointment',
-        title: 'Lab Order Submitted',
-        body: `CBC, CRP ordered for ${order.patientName}. Estimated ready in 2-4 hours.`,
-        time: 'Just now',
-        isRead: false,
-        navigateTo: 'emr',
-      },
-      ready: {
-        type: 'lab',
-        title: 'Lab Results Ready',
-        body: `Results for ${order.patientName} are now available for review.`,
-        time: 'Just now',
-        isRead: false,
-        navigateTo: 'lab-results',
-      },
-    }
 
-    const template = notifMap[type]
-    if (!template) return
-
-    const notif = {
-      id: Date.now(),
-      ...template,
-    }
-
-    setOrderNotifications((prev) => [notif, ...prev])
-
-    if (type === 'ready') {
-      setUnreadCount((prev) => prev + 1)
-    }
-  }
 
   const addBookingNotification = (booking, type) => {
     const notifMap = {
@@ -263,9 +263,11 @@ export default function App() {
     setUnreadCount((prev) => prev + 1)
   }
 
-  const createBookingRequest = (appt) => {
-    // appt is now the full API appointment object returned by POST /appointments/
-    setBookings((prev) => [appt, ...prev])
+  const createBookingRequest = (appt, triageSession) => {
+    const bookingWithTriage = triageSession
+      ? { ...appt, triage_session_id: triageSession.id, ai_referred: true, urgency_level: triageSession.urgency_level }
+      : appt
+    setBookings((prev) => [bookingWithTriage, ...prev])
     setActiveBookingId(appt.id)
     setPatientView('booking-confirmed')
   }
@@ -352,10 +354,21 @@ export default function App() {
     switch (patientView) {
       case 'dashboard':
         return wrap(<PatientDashboardView setCurrentView={navigatePatient} user={currentUser} labOrders={labOrders} />)
-      case 'symptom-checker':
-        return wrap(<SymptomCheckerView setCurrentView={navigatePatient} />)
+      case 'symptom-checker': {
+        const tid = patientViewData?.triageSessionId
+        return wrap(<SymptomCheckerView setCurrentView={navigatePatient} currentUser={currentUser} initialTriageId={tid} />)
+      }
       case 'booking-wizard':
-        return wrap(<BookingWizardView setCurrentView={navigatePatient} onSubmitBooking={createBookingRequest} currentUser={currentUser} />)
+        return wrap(
+          <BookingWizardView
+            setCurrentView={navigatePatient}
+            onSubmitBooking={createBookingRequest}
+            currentUser={currentUser}
+            triageSession={patientViewData?.triageSession ?? null}
+            onClearTriage={() => navigatePatient('symptom-checker')}
+            preselectedDepartment={patientViewData?.preselectedDepartment ?? null}
+          />,
+        )
       case 'booking-confirmed':
         return wrap(
           <BookingConfirmedView
@@ -370,6 +383,7 @@ export default function App() {
             setCurrentView={navigatePatient}
             setSelectedAppointment={setSelectedAppointment}
             currentUser={currentUser}
+            wsNotifications={orderNotifications}
             onRateDoctor={(appt) => {
               setSelectedAppointment(appt)
               navigatePatient('rating')
@@ -382,6 +396,10 @@ export default function App() {
         return wrap(<RescheduleConfirmedView setCurrentView={navigatePatient} />)
       case 'health-record':
         return wrap(<HealthRecordView setCurrentView={navigatePatient} currentUser={currentUser} />)
+      case 'payment-history':
+        return wrap(<PatientPaymentHistoryView setCurrentView={navigatePatient} currentUser={currentUser} />)
+      case 'triage-history':
+        return wrap(<TriageHistoryView setCurrentView={navigatePatient} currentUser={currentUser} />)
       case 'lab-results':
           return wrap(<LabResultsView setCurrentView={navigatePatient} setSelectedLab={setSelectedLab} labOrders={labOrders} currentUser={currentUser} />)
       case 'lab-detail':
@@ -424,7 +442,7 @@ export default function App() {
   }
 
   function renderDoctorView() {
-    const isFullHeight = doctorView === 'emr' || doctorView === 'doctor-chat'
+    const isFullHeight = doctorView === 'emr' || doctorView === 'doctor-chat' || doctorView === 'triage-queue'
 
     const wrap = (children) => (isFullHeight
       ? (
@@ -452,16 +470,25 @@ export default function App() {
 
     switch (doctorView) {
       case 'dashboard':
-        return wrap(<DoctorDashboardView navigateTo={navigateDoctor} user={currentUser} setSelectedPatient={setSelectedPatient} selectedPatient={selectedPatient} />)
+        return wrap(
+          <DoctorBoard
+            navigateTo={setDoctorView}
+            setSelectedPatient={setSelectedDoctorPatient}
+            user={currentUser}
+            bookings={bookings}
+            updateBookingStatus={updateBookingStatus}
+          />
+        )
       case 'patient-queue':
         return wrap(
           <PatientQueueView
             navigateTo={navigateDoctor}
             user={currentUser}
-            setSelectedPatient={setSelectedPatient}
-            selectedPatient={selectedPatient}
+            setSelectedPatient={setSelectedDoctorPatient}
+            selectedPatient={selectedDoctorPatient}
             bookings={bookings}
             updateBookingStatus={updateBookingStatus}
+            onOpenTriageSession={(id) => { setTriageInitialId(id); navigateDoctor('triage-queue') }}
           />,
         )
       case 'schedule':
@@ -469,27 +496,30 @@ export default function App() {
           <ScheduleView
             navigateTo={navigateDoctor}
             user={currentUser}
-            setSelectedPatient={setSelectedPatient}
-            selectedPatient={selectedPatient}
+            setSelectedPatient={setSelectedDoctorPatient}
+            selectedPatient={selectedDoctorPatient}
             bookings={bookings}
           />,
         )
       case 'emr':
         return wrap(
-          <EMRWorkspaceView
+          <EMRWorkspace
             navigateTo={navigateDoctor}
             user={currentUser}
-            selectedPatient={selectedPatient}
-            setSelectedPatient={setSelectedPatient}
+            selectedPatient={selectedDoctorPatient}
+            setSelectedPatient={setSelectedDoctorPatient}
             labOrders={labOrders}
             setLabOrders={setLabOrders}
-            addOrderNotification={addOrderNotification}
             emrRequestedTab={doctorEmrTab}
             clearEmrRequestedTab={() => setDoctorEmrTab(null)}
           />,
         )
+      case 'doctor-dashboard':
+        return wrap(<DoctorDashboardView navigateTo={navigateDoctor} user={currentUser} setSelectedPatient={setSelectedDoctorPatient} selectedPatient={selectedDoctorPatient} />)
       case 'doctor-chat':
-        return wrap(<DoctorChatView navigateTo={navigateDoctor} user={currentUser} selectedPatient={selectedPatient} />)
+        return wrap(<DoctorChatView navigateTo={navigateDoctor} user={currentUser} selectedPatient={selectedDoctorPatient} />)
+      case 'triage-queue':
+        return wrap(<TriageQueueView navigateTo={navigateDoctor} initialSessionId={triageInitialId} onInitialHandled={() => setTriageInitialId(null)} />)
       case 'lab-review':
         return wrap(
           <LabResultReviewView
@@ -497,12 +527,14 @@ export default function App() {
             setLabOrders={setLabOrders}
             onNotify={(notification) => setOrderNotifications((prev) => [notification, ...prev])}
             onBack={() => navigateDoctor('dashboard')}
+            navigateTo={navigateDoctor}
+            setSelectedPatient={setSelectedDoctorPatient}
           />,
         )
       case 'profile':
         return wrap(<DoctorProfileView navigateTo={navigateDoctor} user={currentUser} />)
       default:
-        return wrap(<DoctorDashboardView navigateTo={navigateDoctor} user={currentUser} setSelectedPatient={setSelectedPatient} selectedPatient={selectedPatient} />)
+        return wrap(<DoctorDashboardView navigateTo={navigateDoctor} user={currentUser} setSelectedPatient={setSelectedDoctorPatient} selectedPatient={selectedDoctorPatient} />)
     }
   }
 
@@ -537,6 +569,8 @@ export default function App() {
         return wrap(<UserManagementView {...props} />)
       case 'appointments':
         return wrap(<AppointmentManagementView {...props} />)
+      case 'payment-history':
+        return wrap(<AdminPaymentHistoryView {...props} />)
       case 'reports':
         return wrap(<ReportsView {...props} />)
       case 'settings':
@@ -546,15 +580,10 @@ export default function App() {
     }
   }
 
-  const appStyle = {
-    fontFamily: "'Inter', -apple-system, sans-serif",
-    WebkitFontSmoothing: 'antialiased',
-  }
-
   // ── Loading spinner (no scroll lock needed) ────────────────────────────────
   if (!appReady) {
     return (
-      <div className={`${dark ? 'dark' : ''} flex h-screen w-full items-center justify-center bg-[#f8fafc] dark:bg-[#08080f]`} style={appStyle}>
+      <div className={`${dark ? 'dark' : ''} app-root flex h-screen w-full items-center justify-center bg-[#f8fafc] dark:bg-[#08080f]`}>
         <span className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" aria-label="Loading" />
       </div>
     )
@@ -564,7 +593,7 @@ export default function App() {
   if (!currentUser) {
     if (authPage === 'landing') {
       return (
-        <div className={dark ? 'dark' : ''} style={appStyle}>
+        <div className={`${dark ? 'dark' : ''} app-root`}>
           <LandingPage
             onLogin={() => setAuthPage('login')}
             onSignup={() => setAuthPage('signup')}
@@ -574,22 +603,59 @@ export default function App() {
     }
     if (authPage === 'signup') {
       return (
-        <div style={appStyle}>
+        <div className={`${dark ? 'dark' : ''} app-root`}>
           <SignupView
             dark={dark}
             setDark={setDark}
-            onSuccess={() => setAuthPage('login')}
+            onSuccess={(registeredEmail) => {
+              setPendingEmail(registeredEmail)
+              setAuthPage('otp-verify')
+            }}
             onLoginClick={() => setAuthPage('login')}
           />
         </div>
       )
     }
+    if (authPage === 'otp-verify') {
+      return (
+        <div className={`${dark ? 'dark' : ''} app-root`}>
+          <OtpVerifyView
+            email={pendingEmail}
+            dark={dark}
+            setDark={setDark}
+            onVerified={() => setAuthPage('login')}
+            onBackToLogin={() => setAuthPage('login')}
+          />
+        </div>
+      )
+    }
+
+    if (authPage === 'reset-password') {
+      return (
+        <div className={`${dark ? 'dark' : ''} app-root`}>
+          <ResetPasswordView
+            dark={dark}
+            setDark={setDark}
+            initialEmail={pendingEmail}
+            onBackToLogin={() => setAuthPage('login')}
+          />
+        </div>
+      )
+    }
     return (
-      <div style={appStyle}>
+      <div className={`${dark ? 'dark' : ''} app-root`}>
         <LoginView
           dark={dark}
           setDark={setDark}
           onLogin={handleLogin}
+          onNeedVerify={(email) => {
+            setPendingEmail(email)
+            setAuthPage('otp-verify')
+          }}
+          onForgotPassword={(email) => {
+            setPendingEmail(email || '')
+            setAuthPage('reset-password')
+          }}
           onSignupClick={() => setAuthPage('signup')}
         />
       </div>
@@ -599,8 +665,7 @@ export default function App() {
   // ── Authenticated app shell (scroll-locked sidebar layout) ─────────────────
   return (
     <div
-      className={`${dark ? 'dark' : ''} flex h-screen overflow-hidden overflow-x-hidden w-full max-w-full`}
-      style={appStyle}
+      className={`${dark ? 'dark' : ''} app-root flex h-screen overflow-hidden overflow-x-hidden w-full max-w-full`}
     >
       {currentUser?.role === 'patient' && !currentUser?.is_profile_completed && (
         <ProfileSetupView
@@ -662,7 +727,8 @@ export default function App() {
               setMobileOpen={setDoctorMobileOpen}
               setDark={setDark}
               dark={dark}
-              selectedPatient={selectedPatient}
+              selectedPatient={selectedDoctorPatient}
+              setSelectedPatient={setSelectedDoctorPatient}
               labOrders={labOrders}
               bookings={bookings}
               setEmrTab={setDoctorEmrTab}

@@ -157,3 +157,21 @@ export const getRiskConfig = (riskLevel) => {
       }
   }
 }
+
+export const SYMPTOM_SPECIALTY_SUGGESTIONS = {
+  headache: ['Neurology', 'General Medicine'],
+  fever: ['General Medicine', 'General Surgery'],
+  chest: ['Cardiology', 'General Medicine'],
+  heart: ['Cardiology', 'General Medicine'],
+  fatigue: ['General Medicine', 'Neurology'],
+  stomach: ['General Medicine', 'General Surgery'],
+  nausea: ['General Medicine', 'General Surgery'],
+  vomit: ['General Medicine', 'General Surgery'],
+  abdominal: ['General Medicine', 'General Surgery'],
+  diarrhea: ['General Medicine', 'General Surgery'],
+  bowel: ['General Surgery', 'General Medicine'],
+  back: ['General Medicine', 'General Surgery'],
+  skin: ['Dermatology', 'General Medicine'],
+  joint: ['General Medicine', 'Neurology'],
+  default: ['General Medicine'],
+}

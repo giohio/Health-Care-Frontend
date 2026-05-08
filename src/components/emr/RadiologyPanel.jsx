@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import PropTypes from 'prop-types'
 import AiDisclaimer from '../shared/AiDisclaimer'
 
@@ -107,7 +108,22 @@ function findingLabel(status) {
 }
 
 export default function RadiologyPanel({ data }) {
+  const [zoom, setZoom] = useState(1)
+  const [rotation, setRotation] = useState(0)
+
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <p className="text-sm font-medium text-slate-500 dark:text-[#70708a]">No radiology data available</p>
+        <p className="mt-1 text-xs text-slate-400 dark:text-[#505060]">Order an imaging study to view results here.</p>
+      </div>
+    )
+  }
   const resultBadge = getResultBadge(data.result, data.confidence)
+
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 3))
+  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5))
+  const handleRotate = () => setRotation((r) => r + 90)
 
   return (
     <div className="flex flex-col gap-5 pb-6">
@@ -132,7 +148,12 @@ export default function RadiologyPanel({ data }) {
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-[#252530] dark:bg-[#111118]">
         <div className="relative flex h-64 items-center justify-center bg-slate-900 dark:bg-[#0a0a0f]">
           {data.imageUrl ? (
-            <img src={data.imageUrl} className="h-full w-full object-contain" alt="Chest X-Ray" />
+            <img
+              src={data.imageUrl}
+              className="h-full w-full object-contain"
+              alt="Chest X-Ray"
+              style={{ transform: `scale(${zoom}) rotate(${rotation}deg)`, transition: 'transform 200ms ease' }}
+            />
           ) : (
             <div className="flex h-64 flex-col items-center justify-center gap-3">
               <span className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-800 text-slate-600 dark:bg-[#1c1c25] dark:text-[#404050]">
@@ -152,6 +173,7 @@ export default function RadiologyPanel({ data }) {
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-700 dark:hover:bg-[#1c1c25]"
               aria-label="Zoom in"
+              onClick={handleZoomIn}
             >
               <span className="inline-flex h-3.5 w-3.5"><ZoomInIcon /></span>
             </button>
@@ -160,6 +182,7 @@ export default function RadiologyPanel({ data }) {
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-700 dark:hover:bg-[#1c1c25]"
               aria-label="Zoom out"
+              onClick={handleZoomOut}
             >
               <span className="inline-flex h-3.5 w-3.5"><ZoomOutIcon /></span>
             </button>
@@ -168,6 +191,7 @@ export default function RadiologyPanel({ data }) {
               type="button"
               className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-700 dark:hover:bg-[#1c1c25]"
               aria-label="Rotate image"
+              onClick={handleRotate}
             >
               <span className="inline-flex h-3.5 w-3.5"><RotateCcwIcon /></span>
             </button>

@@ -82,6 +82,33 @@ function ChatIcon() {
   )
 }
 
+function LabReviewIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 3h4" />
+      <path d="M10 3v6l-5.8 9.5a2 2 0 0 0 1.7 3h12.2a2 2 0 0 0 1.7-3L14 9V3" />
+      <path d="M8.5 13h7" />
+    </svg>
+  )
+}
+
+function ProfileIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 20a8 8 0 0 1 16 0" />
+    </svg>
+  )
+}
+
+function TriageIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 3l1.9 5.6L19.5 10l-5.6 1.4L12 17l-1.9-5.6L4.5 10l5.6-1.4L12 3z" />
+    </svg>
+  )
+}
+
 function LogoutIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -92,12 +119,23 @@ function LogoutIcon() {
   )
 }
 
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
+    </svg>
+  )
+}
+
 const NAV_ITEMS = [
-  { key: 'dashboard', label: 'Dashboard', Icon: DashboardIcon },
-  { key: 'patient-queue', label: 'Patient Queue', Icon: QueueIcon },
+  { key: 'doctor-dashboard', label: 'Dashboard', Icon: HomeIcon },
+  { key: 'dashboard', label: 'Clinical Board', Icon: DashboardIcon },
   { key: 'schedule', label: 'Schedule', Icon: ScheduleIcon },
   { key: 'emr', label: 'EMR Workspace', Icon: EMRIcon },
-  { key: 'doctor-chat', label: 'Doctor Chat', Icon: ChatIcon },
+  { key: 'lab-review', label: 'Lab Review', Icon: LabReviewIcon },
+  { key: 'doctor-chat', label: 'Clinical Assistant', Icon: ChatIcon },
+  { key: 'profile', label: 'Settings', Icon: ProfileIcon },
 ]
 
 function Brand({ expanded }) {
@@ -141,8 +179,8 @@ function NavButton({ active, expanded, item, onClick }) {
           : 'hover:bg-slate-100 dark:hover:bg-[#101524]',
       ].join(' ')}
       aria-current={active ? 'page' : undefined}
-      aria-label={!expanded ? item.label : undefined}
-      title={!expanded ? item.label : undefined}
+      aria-label={expanded ? undefined : item.label}
+      title={expanded ? undefined : item.label}
     >
       <span className={`inline-flex h-5 w-5 items-center justify-center ${iconTone}`}>
         <item.Icon />
@@ -161,6 +199,65 @@ NavButton.propTypes = {
     Icon: PropTypes.elementType.isRequired,
   }).isRequired,
   onClick: PropTypes.func.isRequired,
+}
+
+function UserCard({ expanded, mobileOpen, user, onLogout }) {
+  const isExpanded = expanded || mobileOpen
+  return (
+    <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-2 dark:border-[#1a2336] dark:bg-[#0f1524]/70">
+      <button
+        type="button"
+        className={[
+          'flex w-full items-center rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-white dark:hover:bg-[#151f33]',
+          isExpanded ? 'gap-2.5' : 'justify-center',
+        ].join(' ')}
+        onClick={onLogout}
+        aria-label={isExpanded ? undefined : 'Sign out'}
+        title={isExpanded ? undefined : 'Sign out'}
+      >
+        <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br text-[12px] font-semibold text-white ${user.avatar.from} ${user.avatar.to}`}>
+          {user.initials}
+        </span>
+        {isExpanded && (
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-slate-900 dark:text-[#f5f7ff]">{user.name}</span>
+            <span className="block truncate text-xs text-slate-500 dark:text-[#7f89a0]">{user.email}</span>
+          </span>
+        )}
+      </button>
+
+      <button
+        type="button"
+        className={[
+          'mt-1.5 flex w-full items-center rounded-xl px-2 py-2 text-left text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10',
+          isExpanded ? 'gap-2.5' : 'justify-center',
+        ].join(' ')}
+        onClick={onLogout}
+        aria-label={isExpanded ? undefined : 'Sign out'}
+        title={isExpanded ? undefined : 'Sign out'}
+      >
+        <span className="inline-flex h-5 w-5 items-center justify-center">
+          <LogoutIcon />
+        </span>
+        {isExpanded && <span className="text-sm font-medium">Sign Out</span>}
+      </button>
+    </div>
+  )
+}
+
+UserCard.propTypes = {
+  expanded: PropTypes.bool.isRequired,
+  mobileOpen: PropTypes.bool.isRequired,
+  user: PropTypes.shape({
+    name: PropTypes.string.isRequired,
+    email: PropTypes.string.isRequired,
+    initials: PropTypes.string.isRequired,
+    avatar: PropTypes.shape({
+      from: PropTypes.string.isRequired,
+      to: PropTypes.string.isRequired,
+    }).isRequired,
+  }).isRequired,
+  onLogout: PropTypes.func.isRequired,
 }
 
 export default function DoctorSideNav({
@@ -230,44 +327,7 @@ export default function DoctorSideNav({
           ))}
         </nav>
 
-        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-2 dark:border-[#1a2336] dark:bg-[#0f1524]/70">
-          <button
-            type="button"
-            className={[
-              'flex w-full items-center rounded-xl px-2 py-2.5 text-left transition-colors hover:bg-white dark:hover:bg-[#151f33]',
-              expanded || mobileOpen ? 'gap-2.5' : 'justify-center',
-            ].join(' ')}
-            onClick={onLogout}
-            aria-label={!expanded && !mobileOpen ? 'Sign out' : undefined}
-            title={!expanded && !mobileOpen ? 'Sign out' : undefined}
-          >
-            <span className={`inline-flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br text-[12px] font-semibold text-white ${user.avatar.from} ${user.avatar.to}`}>
-              {user.initials}
-            </span>
-            {(expanded || mobileOpen) && (
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-slate-900 dark:text-[#f5f7ff]">{user.name}</span>
-                <span className="block truncate text-xs text-slate-500 dark:text-[#7f89a0]">{user.email}</span>
-              </span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className={[
-              'mt-1.5 flex w-full items-center rounded-xl px-2 py-2 text-left text-rose-600 transition-colors hover:bg-rose-50 dark:text-rose-300 dark:hover:bg-rose-500/10',
-              expanded || mobileOpen ? 'gap-2.5' : 'justify-center',
-            ].join(' ')}
-            onClick={onLogout}
-            aria-label={!expanded && !mobileOpen ? 'Sign out' : undefined}
-            title={!expanded && !mobileOpen ? 'Sign out' : undefined}
-          >
-            <span className="inline-flex h-5 w-5 items-center justify-center">
-              <LogoutIcon />
-            </span>
-            {(expanded || mobileOpen) && <span className="text-sm font-medium">Sign Out</span>}
-          </button>
-        </div>
+        <UserCard expanded={expanded} mobileOpen={mobileOpen} user={user} onLogout={onLogout} />
       </aside>
     </>
   )
