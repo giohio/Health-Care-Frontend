@@ -1,29 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import PropTypes from 'prop-types'
 import { IconWarning } from '../../icons'
-
-const INITIAL_PERSONAL = {
-  fullName: 'Jane Doe',
-  dateOfBirth: 'March 4, 1990  (Age 36)',
-  gender: 'Female',
-  bloodType: 'O+',
-  phone: '+84 912 345 678',
-  email: 'jane.doe@email.com',
-}
+import { patientApi } from '../../api/patient'
+import { clinicalApi } from '../../api/clinical'
 
 const BLOOD_TYPES = ['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']
-
-const INITIAL_ALLERGIES = [
-  { id: 1, name: 'Penicillin', severity: 'Severe', reaction: 'Anaphylaxis' },
-  { id: 2, name: 'Seafood', severity: 'Severe', reaction: 'Hives, difficulty breathing' },
-  { id: 3, name: 'Dust Mites', severity: 'Mild', reaction: 'Sneezing, watery eyes' },
-]
-
-const HISTORY_ITEMS = [
-  { id: 1, date: 'February 2025', title: 'General Check-up', note: 'Routine annual examination. No abnormalities found.' },
-  { id: 2, date: 'November 2024', title: 'Neurology Consultation', note: 'Referred for recurring migraines. MRI ordered.' },
-  { id: 3, date: 'August 2024', title: 'Lab Tests', note: 'Full blood panel. Results within normal range.' },
-  { id: 4, date: 'March 2024', title: 'General Check-up', note: 'Mild iron deficiency noted. Supplements prescribed.' },
-]
 
 function TrashIcon() {
   return (
@@ -52,18 +33,103 @@ function PersonalRow({ label, control }) {
   )
 }
 
-export default function HealthRecordView() {
+PersonalRow.propTypes = { label: PropTypes.string.isRequired, control: PropTypes.node.isRequired }
+
+function parseAllergiesString(str) {
+  if (!str) return []
+  return str.split(';').map((s, i) => {
+    const trimmed = s.trim()
+    if (!trimmed) return null
+    const match = trimmed.match(/^(.+?)\s*\((\w+)\):\s*(.+)$/)
+    if (match) return { id: i + 1, name: match[1].trim(), severity: match[2].trim(), reaction: match[3].trim() }
+    return { id: i + 1, name: trimmed, severity: 'Moderate', reaction: '' }
+  }).filter(Boolean)
+}
+
+function serializeAllergies(list) {
+  return list.filter((a) => a.name).map((a) => `${a.name} (${a.severity}): ${a.reaction}`).join('; ')
+}
+
+export default function HealthRecordView({ currentUser }) {
+  const [loading, setLoading] = useState(true)
+  const [saveLoading, setSaveLoading] = useState(false)
+  const [error, setError] = useState(null)
   const [isEditingPersonal, setIsEditingPersonal] = useState(false)
-  const [personal, setPersonal] = useState(INITIAL_PERSONAL)
-  const [allergies, setAllergies] = useState(INITIAL_ALLERGIES)
+  const [personal, setPersonal] = useState({ fullName: '', dateOfBirth: '', gender: '', bloodType: '', phone: '', email: '' })
+  const [health, setHealth] = useState({ chronic_conditions: '', current_medications: '', past_surgeries: '', family_history: '' })
+  const [clinicalSummary, setClinicalSummary] = useState(null)
+  const [allergies, setAllergies] = useState([])
   const [fadingAllergyIds, setFadingAllergyIds] = useState([])
+
+  const loadProfile = useCallback(async () => {
+    if (!currentUser?.id) return
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await patientApi.getProfile()
+      const p = data.profile ?? {}
+      const h = data.health_background ?? {}
+      setPersonal({
+        fullName: p.full_name ?? '',
+        dateOfBirth: p.date_of_birth ?? '',
+        gender: p.gender ?? '',
+        bloodType: p.blood_type ?? '',
+        phone: p.phone_number ?? '',
+        email: currentUser?.email ?? '',
+      })
+      setHealth({
+        chronic_conditions: h.chronic_conditions ?? '',
+        current_medications: h.current_medications ?? '',
+        past_surgeries: h.past_surgeries ?? '',
+        family_history: h.family_history ?? '',
+      })
+      setAllergies(parseAllergiesString(h.allergies))
+
+      try {
+        const cData = await clinicalApi.getSummary(currentUser.id)
+        if (cData.success && cData.data) {
+          setClinicalSummary(cData.data)
+        }
+      } catch (cErr) {
+        console.error('Failed to load clinical summary:', cErr)
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load health record')
+    } finally {
+      setLoading(false)
+    }
+  }, [currentUser?.email, currentUser?.id])
+
+  useEffect(() => { loadProfile() }, [loadProfile])
+
+  async function handleSavePersonal() {
+    setSaveLoading(true)
+    try {
+      await patientApi.updateProfile({
+        full_name: personal.fullName,
+        date_of_birth: personal.dateOfBirth,
+        gender: personal.gender,
+        blood_type: personal.bloodType,
+        phone_number: personal.phone,
+      })
+      await patientApi.updateHealth({
+        ...health,
+        allergies: serializeAllergies(allergies),
+      })
+      setIsEditingPersonal(false)
+    } catch (err) {
+      setError(err.message || 'Failed to save')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
 
   function handlePersonalChange(key, value) {
     setPersonal((prev) => ({ ...prev, [key]: value }))
   }
 
   function handleAddAllergy() {
-    const id = Date.now()
+    const id = allergies.length ? Math.max(...allergies.map((a) => a.id)) + 1 : 1
     setAllergies((prev) => [...prev, { id, name: '', severity: 'Moderate', reaction: '', isNew: true }])
   }
 
@@ -73,13 +139,52 @@ export default function HealthRecordView() {
 
   function handleDeleteAllergy(id) {
     setFadingAllergyIds((prev) => [...prev, id])
-    window.setTimeout(() => {
-      setAllergies((prev) => prev.filter((item) => item.id !== id))
-      setFadingAllergyIds((prev) => prev.filter((value) => value !== id))
+    globalThis.setTimeout(() => {
+      finalizeDeleteAllergy(id)
     }, 220)
   }
 
+  function finalizeDeleteAllergy(id) {
+    setAllergies((prev) => prev.filter((item) => item.id !== id))
+    setFadingAllergyIds((prev) => prev.filter((value) => value !== id))
+  }
+
+  function handleHealthChange(key, value) {
+    setHealth((prev) => ({ ...prev, [key]: value }))
+  }
+
+  async function handleSaveAllergies() {
+    setSaveLoading(true)
+    try {
+      await patientApi.updateHealth({ ...health, allergies: serializeAllergies(allergies) })
+      setAllergies((prev) => prev.map((a) => ({ ...a, isNew: false })))
+    } catch (err) {
+      setError(err.message || 'Failed to save allergies')
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
   const inputClasses = 'w-full border-b border-indigo-300 bg-transparent pb-0.5 text-slate-900 outline-none focus:border-indigo-600 dark:border-indigo-600 dark:text-[#eeeef5] dark:focus:border-indigo-400'
+
+  let actionBtnText = 'Edit'
+  if (saveLoading) actionBtnText = 'Saving...'
+  else if (isEditingPersonal) actionBtnText = 'Save'
+
+  const personalActionClass = isEditingPersonal
+    ? 'bg-indigo-600 text-white hover:bg-indigo-700 dark:hover:bg-indigo-500'
+    : 'border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5]'
+
+  function handlePersonalActionClick() {
+    if (isEditingPersonal) {
+      handleSavePersonal()
+      return
+    }
+    setIsEditingPersonal(true)
+  }
+
+  if (loading) return <div className="api-loading"><div className="api-skeleton" /><div className="api-skeleton api-skeleton--short" /></div>
+  if (error) return <div className="api-error"><p>{error}</p><button onClick={loadProfile} className="api-error__retry">Retry</button></div>
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -91,27 +196,36 @@ export default function HealthRecordView() {
           <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#505060]">Personal Information</p>
           <button
             type="button"
-            className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-all duration-150 ${isEditingPersonal ? 'bg-indigo-600 text-white hover:bg-indigo-700 dark:hover:bg-indigo-500' : 'border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#16161e] dark:hover:text-[#eeeef5]'}`}
-            onClick={() => setIsEditingPersonal((prev) => !prev)}
+            disabled={saveLoading}
+            className={`rounded-xl px-3 py-1.5 text-sm font-medium transition-all duration-150 ${personalActionClass}`}
+            onClick={handlePersonalActionClick}
           >
-            {isEditingPersonal ? 'Save' : 'Edit'}
+            {actionBtnText}
           </button>
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100 dark:border-[#252530] dark:bg-[#111118] dark:divide-[#1c1c25]">
-          <PersonalRow label="Full Name" control={isEditingPersonal ? <input className={inputClasses} value={personal.fullName} onChange={(e) => handlePersonalChange('fullName', e.target.value)} /> : personal.fullName} />
-          <PersonalRow label="Date of Birth" control={isEditingPersonal ? <input className={inputClasses} value={personal.dateOfBirth} onChange={(e) => handlePersonalChange('dateOfBirth', e.target.value)} /> : personal.dateOfBirth} />
-          <PersonalRow label="Gender" control={isEditingPersonal ? <input className={inputClasses} value={personal.gender} onChange={(e) => handlePersonalChange('gender', e.target.value)} /> : personal.gender} />
+          <PersonalRow label="Full Name" control={isEditingPersonal ? <input className={inputClasses} value={personal.fullName} onChange={(e) => handlePersonalChange('fullName', e.target.value)} /> : personal.fullName || '—'} />
+          <PersonalRow label="Date of Birth" control={isEditingPersonal ? <input type="date" className={inputClasses} value={personal.dateOfBirth} onChange={(e) => handlePersonalChange('dateOfBirth', e.target.value)} /> : personal.dateOfBirth || '—'} />
+          <PersonalRow label="Gender" control={isEditingPersonal ? (
+            <select className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-900 outline-none dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#eeeef5]" value={personal.gender} onChange={(e) => handlePersonalChange('gender', e.target.value)}>
+              <option value="">Select</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+            </select>
+          ) : personal.gender || '—'} />
           <PersonalRow
             label="Blood Type"
             control={isEditingPersonal ? (
               <select className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-900 outline-none dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#eeeef5]" value={personal.bloodType} onChange={(e) => handlePersonalChange('bloodType', e.target.value)}>
+                <option value="">Select</option>
                 {BLOOD_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
               </select>
-            ) : personal.bloodType}
+            ) : personal.bloodType || '—'}
           />
-          <PersonalRow label="Phone" control={isEditingPersonal ? <input className={inputClasses} value={personal.phone} onChange={(e) => handlePersonalChange('phone', e.target.value)} /> : personal.phone} />
-          <PersonalRow label="Email" control={isEditingPersonal ? <input className={inputClasses} value={personal.email} onChange={(e) => handlePersonalChange('email', e.target.value)} /> : personal.email} />
+          <PersonalRow label="Phone" control={isEditingPersonal ? <input className={inputClasses} value={personal.phone} onChange={(e) => handlePersonalChange('phone', e.target.value)} /> : personal.phone || '—'} />
+          <PersonalRow label="Email" control={personal.email || '—'} />
         </div>
       </section>
 
@@ -122,6 +236,9 @@ export default function HealthRecordView() {
         </div>
 
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100 dark:border-[#252530] dark:bg-[#111118] dark:divide-[#1c1c25]">
+          {allergies.length === 0 && (
+            <p className="px-5 py-4 text-sm text-slate-400 dark:text-[#606070]">No allergies recorded.</p>
+          )}
           {allergies.map((allergy) => {
             const isFading = fadingAllergyIds.includes(allergy.id)
             const isEditable = allergy.isNew === true
@@ -159,26 +276,86 @@ export default function HealthRecordView() {
           })}
         </div>
 
-        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50/90 p-4 text-rose-700 shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-xl dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]" role="alert" aria-live="polite">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300"><IconWarning size={16} /></span>
-          <p className="text-sm leading-relaxed">Severe allergies are automatically flagged to all assigned doctors before every appointment.</p>
-        </div>
+        {allergies.some((a) => a.severity === 'Severe') && (
+          <div className="mt-4 flex items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50/90 p-4 text-rose-700 shadow-[0_8px_32px_rgba(0,0,0,0.06)] backdrop-blur-xl dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]" role="alert" aria-live="polite">
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-300"><IconWarning size={16} /></span>
+            <p className="text-sm leading-relaxed">Severe allergies are automatically flagged to all assigned doctors before every appointment.</p>
+          </div>
+        )}
+
+        {allergies.length > 0 && (
+          <div className="mt-3 flex justify-end">
+            <button
+              type="button"
+              disabled={saveLoading}
+              onClick={handleSaveAllergies}
+              className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 dark:hover:bg-indigo-500"
+            >
+              {saveLoading ? 'Saving...' : 'Save Allergies'}
+            </button>
+          </div>
+        )}
       </section>
 
       <section className="mt-10">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#505060]">Medical History</p>
-
-        <div className="ml-2 border-l-2 border-slate-100 pl-6 dark:border-[#252530]">
-          {HISTORY_ITEMS.map((item) => (
-            <div key={item.id} className="relative mb-6 last:mb-0">
-              <span className="absolute -left-[31px] top-1.5 h-3 w-3 rounded-full border-2 border-slate-300 bg-white dark:border-[#404050] dark:bg-[#111118]" aria-hidden="true" />
-              <p className="text-xs text-slate-400 dark:text-[#606070]">{item.date}</p>
-              <p className="mt-0.5 text-sm font-semibold tracking-tight text-slate-900 dark:text-[#eeeef5]">{item.title}</p>
-              <p className="mt-0.5 text-sm leading-relaxed text-slate-600 dark:text-[#9898b0]">{item.note}</p>
-            </div>
+        <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#505060]">Health Background</p>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100 dark:border-[#252530] dark:bg-[#111118] dark:divide-[#1c1c25]">
+          {[
+            { key: 'chronic_conditions', label: 'Chronic Conditions' },
+            { key: 'current_medications', label: 'Current Medications' },
+            { key: 'past_surgeries', label: 'Past Surgeries' },
+            { key: 'family_history', label: 'Family History' },
+          ].map(({ key, label }) => (
+            <PersonalRow
+              key={key}
+              label={label}
+              control={
+                isEditingPersonal
+                  ? <input className={inputClasses} value={health[key]} onChange={(e) => handleHealthChange(key, e.target.value)} />
+                  : health[key] || '—'
+              }
+            />
           ))}
         </div>
       </section>
+
+      {clinicalSummary && (
+        <section className="mt-10 mb-10">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 dark:text-[#505060]">Clinical Summary (Auto-synced)</p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 dark:border-[#252530] dark:bg-[#111118]">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5] mb-2">Diagnoses</h3>
+            {clinicalSummary.diagnoses && clinicalSummary.diagnoses.length > 0 ? (
+              <ul className="list-disc list-inside text-sm text-slate-600 dark:text-[#9898b0] mb-4 pl-4">
+                {clinicalSummary.diagnoses.map(d => (
+                  <li key={d.id}>{d.disease_name} (Code: {d.icd_10_code}) - {d.status}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-400 dark:text-[#606070] mb-4">No active diagnoses found.</p>
+            )}
+
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5] mb-2">Medications</h3>
+            {clinicalSummary.medications && clinicalSummary.medications.length > 0 ? (
+              <ul className="list-disc list-inside text-sm text-slate-600 dark:text-[#9898b0] pl-4">
+                {clinicalSummary.medications.map(m => (
+                  <li key={m.id}>{m.medication_name} - {m.dosage} ({m.frequency})</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-400 dark:text-[#606070]">No active medications found.</p>
+            )}
+          </div>
+        </section>
+      )}
     </div>
   )
 }
+
+HealthRecordView.propTypes = {
+  currentUser: PropTypes.shape({ id: PropTypes.string, email: PropTypes.string }),
+}
+
+HealthRecordView.defaultProps = {
+  currentUser: null,
+}
+

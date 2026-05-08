@@ -1,15 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
 import { LAB_AI_ANALYSIS } from '../../data/aiAnalysis'
 import { getSpecialtyTabs } from '../../data/specialtyResults'
 import { formatRelativeTime } from '../../utils/formatTime'
 import AiRiskBadge from '../../components/shared/AiRiskBadge'
+import AiDisclaimer from '../../components/shared/AiDisclaimer'
 import RadiologyPanel from '../../components/emr/RadiologyPanel'
 import CardiologyPanel from '../../components/emr/CardiologyPanel'
 import OphthalmologyPanel from '../../components/emr/OphthalmologyPanel'
 import DermatologyPanel from '../../components/emr/DermatologyPanel'
 import PulmonologyPanel from '../../components/emr/PulmonologyPanel'
 import NephrologyPanel from '../../components/emr/NephrologyPanel'
+import { patientApi } from '../../api/patient'
+import { appointmentApi } from '../../api/appointment'
+import { clinicalApi } from '../../api/clinical'
+import { emrApi } from '../../api/emr'
+import { APPOINTMENT_STATUS } from '../../constants/enums'
 
 const FALLBACK_PATIENT = {
   id: 'PT-2024-0142',
@@ -530,32 +536,114 @@ export default function EMRWorkspaceView({
   const [submittedOrderId, setSubmittedOrderId] = useState(null)
   const [orderCounter, setOrderCounter] = useState(1)
 
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
+  const [aiSummaryLines, setAiSummaryLines] = useState([])
+  const [aiSummaryDone, setAiSummaryDone] = useState(false)
+  const [aiSummaryRunId, setAiSummaryRunId] = useState(0)
+  const [aiSummaryMessage, setAiSummaryMessage] = useState('')
+
   const patient = useMemo(() => {
     const current = selectedPatient || {}
-    const name = current.name || FALLBACK_PATIENT.name
-    let gender = current.gender || FALLBACK_PATIENT.gender
+    const name = current.patient_name ?? current.name ?? FALLBACK_PATIENT.name
+    let gender = current.patient_gender ?? current.gender ?? FALLBACK_PATIENT.gender
 
-    if (current.gender === 'F') {
-      gender = 'Female'
-    } else if (current.gender === 'M') {
-      gender = 'Male'
-    }
+    if (gender === 'F') gender = 'Female'
+    else if (gender === 'M') gender = 'Male'
 
     return {
       ...FALLBACK_PATIENT,
       ...current,
       name,
-      initials: current.initials || getInitials(name),
-      specialty: current.specialty || current.appointmentType || FALLBACK_PATIENT.specialty,
-      complaint: current.complaint || FALLBACK_PATIENT.complaint,
+      initials: getInitials(name),
+      specialty: current.specialty_name ?? current.specialty ?? current.appointmentType ?? FALLBACK_PATIENT.specialty,
+      complaint: current.chief_complaint ?? current.complaint ?? FALLBACK_PATIENT.complaint,
       allergies: normalizeAllergies(current),
-      avatar: current.avatar || FALLBACK_PATIENT.avatar,
+      avatar: current.avatar ?? FALLBACK_PATIENT.avatar,
       gender,
-      age: current.age || FALLBACK_PATIENT.age,
-      id: current.id || FALLBACK_PATIENT.id,
-      time: current.time || FALLBACK_PATIENT.time,
+      age: current.patient_age ?? current.age ?? FALLBACK_PATIENT.age,
+      id: current.patient_id ?? current.id ?? FALLBACK_PATIENT.id,
+      time: current.start_time ?? current.time ?? FALLBACK_PATIENT.time,
     }
   }, [selectedPatient])
+
+  const apptId = selectedPatient?.id
+  const patientUserId = selectedPatient?.patient_id
+
+  const [vitals, setVitals] = useState(null)
+  const [pastVisits, setPastVisits] = useState(PAST_VISITS)
+  const [activeMedications, setActiveMedications] = useState(MEDICATIONS)
+  const [recentLabs, setRecentLabs] = useState(LAB_ROWS)
+  const [diagnoses, setDiagnoses] = useState([])
+  const [apptStatus, setApptStatus] = useState(selectedPatient?.status ?? null)
+  const [statusLoading, setStatusLoading] = useState(false)
+
+  const loadPatientData = useCallback(async () => {
+    if (!patientUserId) return
+    const [vitalsResult, visitsResult, summaryResult, labResult] = await Promise.allSettled([
+      patientApi.getLatestVitals(patientUserId),
+      appointmentApi.getByPatient(patientUserId),
+      clinicalApi.getSummary(patientUserId),
+      emrApi.getLabResults({ patient_id: patientUserId })
+    ])
+    
+    if (vitalsResult.status === 'fulfilled' && vitalsResult.value) {
+      setVitals(vitalsResult.value)
+    }
+    
+    if (summaryResult.status === 'fulfilled' && summaryResult.value) {
+      const { medications, vitals_latest, diagnoses: diags } = summaryResult.value
+      if (vitals_latest) setVitals(vitals_latest)
+      if (medications && medications.length > 0) {
+        setActiveMedications(medications.map(m => ({ 
+          name: m.drug_name, 
+          dose: `${m.dosage || ''} - ${m.frequency || ''}`.trim() 
+        })))
+      }
+      if (diags) setDiagnoses(diags)
+    }
+    
+    if (labResult.status === 'fulfilled' && Array.isArray(labResult.value)) {
+       const mappedLabs = labResult.value.map(l => ({
+         test: `Lab Result (ID: ${l.id.substring(0, 4)})`,
+         date: l.created_at ? new Date(l.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : 'Unknown',
+         status: l.status,
+         aiKey: null,
+       }))
+       setRecentLabs([...mappedLabs, ...LAB_ROWS])
+    }
+    
+    if (visitsResult.status === 'fulfilled') {
+      const list = Array.isArray(visitsResult.value)
+        ? visitsResult.value
+        : (visitsResult.value?.appointments ?? [])
+      const completed = list
+        .filter((a) => a.status === APPOINTMENT_STATUS.COMPLETED && a.id !== apptId)
+        .slice(0, 5)
+        .map((a) => ({ date: a.appointment_date ?? a.created_at ?? '', type: a.specialty_name ?? 'Visit', id: a.id }))
+      if (completed.length > 0) setPastVisits(completed)
+    }
+  }, [patientUserId, apptId])
+
+  const handleStatusTransition = useCallback(async (action) => {
+    if (!apptId || statusLoading) return
+    setStatusLoading(true)
+    try {
+      if (action === 'start') {
+        await appointmentApi.start(apptId)
+        setApptStatus(APPOINTMENT_STATUS.IN_PROGRESS)
+      } else if (action === 'complete') {
+        await appointmentApi.complete(apptId)
+        setApptStatus(APPOINTMENT_STATUS.COMPLETED)
+      } else if (action === 'noshow') {
+        await appointmentApi.noShow(apptId)
+        setApptStatus(APPOINTMENT_STATUS.NO_SHOW)
+      }
+    } catch { /* ignore */ } finally {
+      setStatusLoading(false)
+    }
+  }, [apptId, statusLoading])
+
+  useEffect(() => { loadPatientData() }, [loadPatientData])
 
   const severeAllergies = patient.allergies.filter((item) => item.severity.toLowerCase().includes('severe'))
   const selectedTests = LAB_TESTS.filter((test) => orderedTests.includes(test.id))
@@ -568,7 +656,7 @@ export default function EMRWorkspaceView({
   const submittedOrder = submittedOrderId
     ? labOrders.find((order) => order.id === submittedOrderId)
     : null
-  const emrLabWithAi = LAB_ROWS.map((row) => ({
+  const emrLabWithAi = recentLabs.map((row) => ({
     ...row,
     aiData: row.aiKey ? LAB_AI_ANALYSIS[row.aiKey] : null,
   }))
@@ -581,11 +669,39 @@ export default function EMRWorkspaceView({
     { key: 'overview', label: 'Overview', icon: null },
     { key: 'notes', label: 'Notes', icon: null },
     { key: 'orders', label: 'Orders', icon: null },
+    { key: 'ai-summary', label: 'AI Summary', icon: null },
     ...specialtyTabs,
   ]
-  const baseTabs = allTabs.slice(0, 3)
+  const baseTabs = allTabs.slice(0, 4)
   const specialtyData = specialtyTabs.find((tab) => tab.key === emrTab)?.data
   const specialtyLabel = specialtyTabs.map((tab) => tab.label).join(' · ')
+
+  const aiSummaryTemplate = useMemo(() => {
+    const patientName = selectedPatient?.name || patient.name
+
+    return [
+      `**Patient:** ${patientName}`,
+      '**Age:** 45 | **Sex:** Male',
+      '',
+      '**Primary Diagnoses:**',
+      '• Grade 2 hypertension (I10) - currently under treatment',
+      '• Type 2 diabetes mellitus (E11) - suboptimal control',
+      '',
+      '**Current Medications:**',
+      '• Amlodipine 5mg - 1 tablet daily',
+      '• Metformin 500mg - twice daily after meals',
+      '',
+      '**Clinical Notes:**',
+      '• Latest HbA1c: 7.8% (Dec 2024) - requires close follow-up',
+      '• 7-day average blood pressure: 142/88 mmHg',
+      '• Renal function: eGFR 72 - stage G2',
+      '',
+      '**AI Recommendations:**',
+      '• Consider increasing Metformin dose or adding a second agent',
+      '• Schedule repeat HbA1c testing in 3 months',
+      '• Provide targeted nutrition counseling for diabetes management',
+    ]
+  }, [patient.name, selectedPatient?.name])
 
   const soapPlaceholder = `S: Subjective — patient complaint...\n\nO: Objective — examination findings...\n\nA: Assessment — diagnosis...\n\nP: Plan — treatment and follow-up...`
 
@@ -603,6 +719,33 @@ export default function EMRWorkspaceView({
 
     return undefined
   }, [clearEmrRequestedTab, emrRequestedTab])
+
+  useEffect(() => {
+    if (aiSummaryRunId === 0) return undefined
+
+    let cursor = 0
+    let streamTimer = null
+
+    const startTimer = globalThis.setTimeout(() => {
+      streamTimer = globalThis.setInterval(() => {
+        cursor += 1
+        setAiSummaryLines(aiSummaryTemplate.slice(0, cursor))
+
+        if (cursor >= aiSummaryTemplate.length) {
+          globalThis.clearInterval(streamTimer)
+          setAiSummaryLoading(false)
+          setAiSummaryDone(true)
+        }
+      }, 120)
+    }, 800)
+
+    return () => {
+      globalThis.clearTimeout(startTimer)
+      if (streamTimer) {
+        globalThis.clearInterval(streamTimer)
+      }
+    }
+  }, [aiSummaryRunId, aiSummaryTemplate])
 
   const filterIcdResults = (rawValue) => {
     const value = rawValue.trim().toLowerCase()
@@ -622,6 +765,38 @@ export default function EMRWorkspaceView({
   const handleTemplateChange = (value) => {
     setNoteTemplate(value)
     setNoteText(NOTE_TEMPLATES[value] || '')
+  }
+
+  const handleSaveNote = async () => {
+    if (!patientUserId || !noteText.trim()) return;
+    try {
+      setLastSaved('Saving...');
+      await clinicalApi.createNote(patientUserId, {
+        patient_id: patientUserId,
+        doctor_id: user?.id || user?.sub || 'doc-id',
+        content: noteText,
+        appointment_id: apptId,
+        note_type: noteTemplate,
+        is_ai_generated: false,
+      });
+      
+      if (icdCodes.length > 0) {
+        // Also save latest diagnosis just to show flow works
+        await clinicalApi.createDiagnosis(patientUserId, {
+          patient_id: patientUserId,
+          doctor_id: user?.id || user?.sub || 'doc-id',
+          diagnosis_name: icdCodes[0].desc,
+          icd10_code: icdCodes[0].code,
+          diagnosed_at: new Date().toISOString().split('T')[0],
+          appointment_id: apptId,
+        });
+      }
+      
+      setLastSaved(`Today at ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}`);
+    } catch (err) {
+      console.error('Failed to save note:', err);
+      setLastSaved('Error saving');
+    }
   }
 
   const addIcdCode = (result) => {
@@ -652,9 +827,29 @@ export default function EMRWorkspaceView({
     )))
   }
 
-  const handleSubmitOrder = () => {
+  const handleSubmitOrder = async () => {
+    let nextId = `ORD-${orderCounter}`
+    
+    try {
+      const payload = {
+        patient_id: selectedPatient?.id || 'PT-2024-0142',
+        doctor_id: user?.id || 'DR-1',
+        test_name: selectedTestNames.join(', '),
+        test_type: 'blood_panel',
+        department: 'Laboratory',
+        instructions: orderNote,
+        priority: 'routine'
+      };
+
+      const res = await emrApi.createLabOrder(payload);
+      if (res.data?.id) {
+        nextId = res.data.id;
+      }
+    } catch (err) {
+      console.error('Failed to create lab order via API', err);
+    }
+    
     const orderedAt = new Date()
-    const nextId = `ORD-${orderCounter}`
 
     const newOrder = {
       id: nextId,
@@ -688,6 +883,39 @@ export default function EMRWorkspaceView({
       setOrderStep('select')
       setSubmittedOrderId(null)
     }, 30000)
+  }
+
+  const handleGenerateAiSummary = () => {
+    setAiSummaryLoading(true)
+    setAiSummaryDone(false)
+    setAiSummaryLines([])
+    setAiSummaryMessage('')
+    setAiSummaryRunId((prev) => prev + 1)
+  }
+
+  const handleCopySummary = async () => {
+    const text = aiSummaryLines.join('\n')
+
+    if (!text) return
+
+    try {
+      await globalThis.navigator.clipboard.writeText(text)
+      setAiSummaryMessage('Summary copied to clipboard')
+    } catch {
+      setAiSummaryMessage('Copy is not available in this browser')
+    }
+  }
+
+  const handleSaveSummary = () => {
+    const text = aiSummaryLines.join('\n')
+    if (!text) return
+
+    setNoteText((prev) => {
+      const prefix = prev.trim().length > 0 ? `${prev}\n\n` : ''
+      return `${prefix}[AI Medical Summary]\n${text}`
+    })
+
+    setAiSummaryMessage('Saved to notes (mock)')
   }
 
   return (
@@ -753,6 +981,45 @@ export default function EMRWorkspaceView({
         </div>
 
         <div className="flex items-center gap-2">
+          {(() => {
+            const isWaiting = apptStatus === APPOINTMENT_STATUS.PENDING || apptStatus === APPOINTMENT_STATUS.WAITING
+            const inProgress = apptStatus === APPOINTMENT_STATUS.IN_PROGRESS
+            if (isWaiting) {
+              return (
+                <button
+                  type="button"
+                  disabled={statusLoading}
+                  onClick={() => handleStatusTransition('start')}
+                  className="inline-flex items-center gap-2 rounded-xl bg-teal-600 px-4 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:bg-teal-700 disabled:opacity-50 dark:bg-teal-600 dark:hover:bg-teal-500"
+                >
+                  Start Consultation
+                </button>
+              )
+            }
+            if (inProgress) {
+              return (
+                <>
+                  <button
+                    type="button"
+                    disabled={statusLoading}
+                    onClick={() => handleStatusTransition('complete')}
+                    className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:bg-emerald-700 disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+                  >
+                    Complete
+                  </button>
+                  <button
+                    type="button"
+                    disabled={statusLoading}
+                    onClick={() => handleStatusTransition('noshow')}
+                    className="inline-flex items-center gap-2 rounded-xl border border-rose-200 px-4 py-1.5 text-xs font-semibold text-rose-600 transition-all duration-150 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-950/30"
+                  >
+                    No Show
+                  </button>
+                </>
+              )
+            }
+            return null
+          })()}
           <button
             type="button"
             className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white transition-all duration-150 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
@@ -835,9 +1102,9 @@ export default function EMRWorkspaceView({
 
           <SectionLabel>Recent Visits</SectionLabel>
           <div className="mt-3 flex flex-col gap-2">
-            {PAST_VISITS.map((visit) => (
+            {pastVisits.map((visit) => (
               <button
-                key={visit.date}
+                key={visit.date ?? visit.id}
                 type="button"
                 onClick={() => setSelectedPatient(patient)}
                 className="-mx-2 flex items-center justify-between rounded-lg border-b border-slate-100 px-2 py-2 text-left transition-colors hover:bg-slate-50 dark:border-[#1c1c25] dark:hover:bg-[#16161e]"
@@ -879,27 +1146,27 @@ export default function EMRWorkspaceView({
               <div className="grid grid-cols-2 gap-4">
               <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-[#252530] dark:bg-[#111118]">
                 <div className="mb-3 border-b border-slate-100 pb-2 dark:border-[#1c1c25]">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#505060]">Vitals · Last recorded Feb 28</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#505060]">Vitals · {vitals ? `Recorded ${vitals.recorded_at ?? 'recently'}` : 'Last recorded'}</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-[#16161e]">
-                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">120/80</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">{vitals?.blood_pressure ?? '–'}</p>
                     <p className="text-xs text-slate-400 dark:text-[#606070]">mmHg</p>
                     <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400 dark:text-[#505060]">Blood Pressure</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-[#16161e]">
-                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">98.6</p>
-                    <p className="text-xs text-slate-400 dark:text-[#606070]">°F</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">{vitals?.temperature ?? '–'}</p>
+                    <p className="text-xs text-slate-400 dark:text-[#606070]">°{vitals?.temp_unit ?? 'C'}</p>
                     <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400 dark:text-[#505060]">Temperature</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-[#16161e]">
-                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">72</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">{vitals?.heart_rate ?? '–'}</p>
                     <p className="text-xs text-slate-400 dark:text-[#606070]">bpm</p>
                     <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400 dark:text-[#505060]">Heart Rate</p>
                   </div>
                   <div className="rounded-xl bg-slate-50 p-3 text-center dark:bg-[#16161e]">
-                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">16</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-[#eeeef5]">{vitals?.respiratory_rate ?? '–'}</p>
                     <p className="text-xs text-slate-400 dark:text-[#606070]">rpm</p>
                     <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-400 dark:text-[#505060]">Respiratory</p>
                   </div>
@@ -940,8 +1207,8 @@ export default function EMRWorkspaceView({
                 </div>
 
                 <div>
-                  {MEDICATIONS.map((medication) => (
-                    <div key={medication.name} className="flex items-center gap-3 border-b border-slate-100 py-2 last:border-b-0 dark:border-[#1c1c25]">
+                  {activeMedications.map((medication, i) => (
+                    <div key={`${medication.name}-${i}`} className="flex items-center gap-3 border-b border-slate-100 py-2 last:border-b-0 dark:border-[#1c1c25]">
                       <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-50 text-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-400">
                         <span className="inline-flex h-4 w-4"><PillIcon /></span>
                       </span>
@@ -1157,7 +1424,7 @@ export default function EMRWorkspaceView({
 
                   <button
                     type="button"
-                    onClick={() => setLastSaved('Just now')}
+                    onClick={handleSaveNote}
                     className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
                   >
                     <span className="inline-flex h-3.5 w-3.5"><SaveIcon /></span>
@@ -1439,6 +1706,78 @@ export default function EMRWorkspaceView({
             </div>
           )}
 
+          {emrTab === 'ai-summary' && (
+            <div className="mx-auto max-w-3xl">
+              <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-[#eeeef5]">🤖 AI Medical Summary</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-[#70708a]">
+                      Auto-generated from patient records, visit history, and lab results
+                    </p>
+                  </div>
+
+                  <span className="inline-flex items-center rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-xs font-semibold text-indigo-700 dark:border-indigo-800/50 dark:bg-indigo-950/40 dark:text-indigo-300">
+                    Beta
+                  </span>
+                </div>
+
+                <div className="mt-5">
+                  <button
+                    type="button"
+                    onClick={handleGenerateAiSummary}
+                    disabled={aiSummaryLoading}
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                  >
+                    {aiSummaryLoading ? (
+                      <>
+                        <span className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
+                        <span>Analyzing clinical records...</span>
+                      </>
+                    ) : (
+                      <span>Summarize Patient</span>
+                    )}
+                  </button>
+                </div>
+
+                {(aiSummaryLoading || aiSummaryLines.length > 0) && (
+                  <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-[#252530] dark:bg-[#16161e]">
+                    <pre className="whitespace-pre-wrap text-sm leading-6 text-slate-700 dark:text-[#c8c8e0]">{aiSummaryLines.join('\n')}</pre>
+                  </div>
+                )}
+
+                {aiSummaryDone && (
+                  <div className="mt-4 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCopySummary}
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#252530] dark:text-[#c8c8e0] dark:hover:bg-[#1c1c25]"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveSummary}
+                      className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                    >
+                      Save to Notes
+                    </button>
+                    {aiSummaryMessage && <span className="text-xs text-emerald-600 dark:text-emerald-400">{aiSummaryMessage}</span>}
+                  </div>
+                )}
+
+                <div className="mt-5">
+                  <AiDisclaimer
+                    text="AI summary is for reference only and does not replace physician clinical judgment."
+                    modelName="HealthAI Summary v0.9"
+                    dataset="EMR + Labs + Visit Timeline"
+                    analyzedAt="Just now"
+                  />
+                </div>
+              </article>
+            </div>
+          )}
+
           {emrTab === 'radiology' && specialtyData && <RadiologyPanel data={specialtyData} />}
 
           {emrTab === 'cardiology' && specialtyData && <CardiologyPanel data={specialtyData} />}
@@ -1473,27 +1812,38 @@ EMRWorkspaceView.propTypes = {
   navigateTo: PropTypes.func.isRequired,
   selectedPatient: PropTypes.shape({
     id: PropTypes.string,
+    patient_id: PropTypes.string,
+    patient_name: PropTypes.string,
+    patient_age: PropTypes.number,
+    patient_gender: PropTypes.string,
+    status: PropTypes.string,
     name: PropTypes.string,
     initials: PropTypes.string,
     age: PropTypes.number,
     gender: PropTypes.string,
+    specialty_name: PropTypes.string,
     specialty: PropTypes.string,
+    chief_complaint: PropTypes.string,
     complaint: PropTypes.string,
+    start_time: PropTypes.string,
     time: PropTypes.string,
     avatar: PropTypes.shape({
       from: PropTypes.string,
       to: PropTypes.string,
     }),
-    allergies: PropTypes.arrayOf(
-      PropTypes.oneOfType([
-        PropTypes.string,
-        PropTypes.shape({
-          name: PropTypes.string,
-          severity: PropTypes.string,
-          reaction: PropTypes.string,
-        }),
-      ]),
-    ),
+    allergies: PropTypes.oneOfType([
+      PropTypes.string,
+      PropTypes.arrayOf(
+        PropTypes.oneOfType([
+          PropTypes.string,
+          PropTypes.shape({
+            name: PropTypes.string,
+            severity: PropTypes.string,
+            reaction: PropTypes.string,
+          }),
+        ]),
+      ),
+    ]),
   }),
   setSelectedPatient: PropTypes.func.isRequired,
   setLabOrders: PropTypes.func.isRequired,

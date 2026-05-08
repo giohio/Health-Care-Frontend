@@ -5,13 +5,7 @@ import { LAB_AI_ANALYSIS } from '../../data/aiAnalysis'
 import { PATIENT_FRIENDLY_RESULTS } from '../../data/patientSpecialtyResults'
 import AiRiskBadge from '../../components/shared/AiRiskBadge'
 import { formatRelativeTime, getTimeRemaining } from '../../utils/formatTime'
-
-const LAB_RESULTS = [
-  {
-    id: 'full-blood-panel',
-    aiKey: 'full-blood-panel',
-    name: 'Full Blood Panel',
-    status: 'New',
+import { emrApi } from '../../api/emr'
     doctor: 'Dr. Sarah Chen',
     date: 'Received Mar 10, 2025',
     aiSummary: 'Most values are within normal range. Hemoglobin is slightly low - worth discussing with your doctor.',
@@ -116,22 +110,66 @@ function FlaskConicalIcon() {
   )
 }
 
-export default function LabResultsView({ setCurrentView, setSelectedLab, labOrders }) {
+export default function LabResultsView({ setCurrentView, setSelectedLab, labOrders, currentUser }) {
   const [resultType, setResultType] = useState('blood')
   const [filter, setFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [selectedImagingId, setSelectedImagingId] = useState(null)
   const [readyNotifiedOrderIds, setReadyNotifiedOrderIds] = useState([])
   const [toastMessage, setToastMessage] = useState('')
+  const [fetchedResults, setFetchedResults] = useState([])
+
+  useEffect(() => {
+    async function fetchLabResults() {
+      if (!currentUser?.id) return
+      try {
+        const res = await emrApi.getLabResults({ patient_id: currentUser.id })
+        if (res.success && res.data) {
+          const items = Array.isArray(res.data) ? res.data : (res.data.items || [])
+          
+          const mapped = items.map(apiRes => {
+            const aiData = apiRes.ai_draft_text ? { recommendation: apiRes.ai_draft_text } : null
+            return {
+              id: apiRes.id,
+              aiKey: apiRes.id,
+              name: apiRes.file_type ? `Lab Reuslt (${apiRes.file_type.toUpperCase()})` : 'Lab Result',
+              status: apiRes.status === 'PUBLISHED' ? 'Reviewed' : 'New',
+              doctor: 'Your Doctor', // Fallback as we might not have the doctor name linked directly in the compact response
+              date: `Received ${formatRelativeTime(apiRes.created_at || new Date())}`,
+              aiSummary: aiData?.recommendation || 'Results are ready for review.',
+              flags: 0,
+              explanation: aiData?.recommendation || 'Results were generated from your recent lab order.',
+              fileUrl: apiRes.file_url,
+              details: [] // Mapped details if available from API
+            }
+          })
+          setFetchedResults(mapped)
+        }
+      } catch (err) {
+        console.error('Failed to fetch lab results', err)
+      }
+    }
+    fetchLabResults()
+  }, [currentUser])
 
   const pendingOrders = useMemo(() => (
     labOrders.filter(
-      (order) => order.patientId === 'PT-2024-0142' && (order.status === 'pending' || order.status === 'processing'),
+      (order) => order.patientId === 'PT-2024-0142' && (
+        order.status === 'pending'
+        || order.status === 'processing'
+        || order.status === 'PENDING'
+      ),
     )
   ), [labOrders])
 
   const readyOrders = useMemo(() => (
     labOrders.filter(
-      (order) => order.patientId === 'PT-2024-0142' && (order.status === 'ready' || order.status === 'reviewed'),
+      (order) => order.patientId === 'PT-2024-0142' && (
+        order.status === 'ready'
+        || order.status === 'reviewed'
+        || order.status === 'AI_DRAFT'
+        || order.status === 'PUBLISHED'
+      ),
     )
   ), [labOrders])
 
@@ -158,13 +196,18 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
     })
   ), [readyOrders])
 
-  const allBloodResults = useMemo(() => ([...dynamicReadyResults, ...LAB_RESULTS]), [dynamicReadyResults])
+const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResults, ...LAB_RESULTS]), [fetchedResults, dynamicReadyResults])
 
   const visibleResults = useMemo(() => {
-    if (filter === 'new') return allBloodResults.filter((result) => result.status === 'New')
-    if (filter === 'reviewed') return allBloodResults.filter((result) => result.status === 'Reviewed')
-    return allBloodResults
-  }, [allBloodResults, filter])
+    let scopedResults = allBloodResults
+
+    if (filter === 'new') scopedResults = scopedResults.filter((result) => result.status === 'New')
+    if (filter === 'reviewed') scopedResults = scopedResults.filter((result) => result.status === 'Reviewed')
+
+    if (statusFilter === 'pending') return []
+    if (statusFilter === 'ready') return scopedResults
+    return scopedResults
+  }, [allBloodResults, filter, statusFilter])
 
   const selectedImaging = useMemo(
     () => PATIENT_FRIENDLY_RESULTS.find((item) => item.id === selectedImagingId) || null,
@@ -175,14 +218,19 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
     const unseenReadyOrder = readyOrders.find((order) => !readyNotifiedOrderIds.includes(order.id))
     if (!unseenReadyOrder) return
 
-    setReadyNotifiedOrderIds((prev) => [...prev, unseenReadyOrder.id])
-    setToastMessage(`✓ Lab results for ${unseenReadyOrder.tests.join(', ')} are now ready.`)
+    const startTimer = globalThis.setTimeout(() => {
+      setReadyNotifiedOrderIds((prev) => [...prev, unseenReadyOrder.id])
+      setToastMessage(`✓ Lab results for ${unseenReadyOrder.tests.join(', ')} are now ready.`)
+    }, 0)
 
-    const timer = globalThis.setTimeout(() => {
+    const clearTimer = globalThis.setTimeout(() => {
       setToastMessage('')
     }, 2800)
 
-    return () => globalThis.clearTimeout(timer)
+    return () => {
+      globalThis.clearTimeout(startTimer)
+      globalThis.clearTimeout(clearTimer)
+    }
   }, [readyNotifiedOrderIds, readyOrders])
 
   return (
@@ -215,6 +263,28 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
       </div>
 
       {resultType === 'blood' && (
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          {[
+            ['all', 'All'],
+            ['pending', 'Pending Results'],
+            ['ready', 'Results Ready'],
+          ].map(([key, label]) => {
+            const active = statusFilter === key
+            return (
+              <button
+                key={key}
+                type="button"
+                className={`rounded-lg border px-4 py-1.5 text-sm font-medium transition-all ${active ? 'border-slate-900 bg-slate-900 text-white dark:border-[#eeeef5] dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'border-slate-200 text-slate-500 hover:border-slate-300 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-[#353545]'}`}
+                onClick={() => setStatusFilter(key)}
+              >
+                {label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {resultType === 'blood' && (
         <div className="mt-6 mb-6 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-[#1c1c25]">
           <div className="flex gap-2" role="tablist" aria-label="Lab result filters">
             {[
@@ -242,7 +312,7 @@ export default function LabResultsView({ setCurrentView, setSelectedLab, labOrde
 
       {resultType === 'blood' && (
         <div className="space-y-4">
-          {pendingOrders.length > 0 && (
+          {statusFilter !== 'ready' && pendingOrders.length > 0 && (
             <section>
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-[#505060]">Pending Results</p>
 
@@ -448,8 +518,10 @@ LabResultsView.propTypes = {
   labOrders: PropTypes.arrayOf(PropTypes.object),
   setCurrentView: PropTypes.func.isRequired,
   setSelectedLab: PropTypes.func.isRequired,
+  currentUser: PropTypes.object,
 }
 
 LabResultsView.defaultProps = {
   labOrders: [],
+  currentUser: null,
 }

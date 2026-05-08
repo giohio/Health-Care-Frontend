@@ -1,8 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import './index.css'
-import { findUser } from './data/users'
+
+import { authApi } from './api/auth'
+import { patientApi } from './api/patient'
+import { connectWebSocket } from './api/websocket'
 
 import LoginView from './views/auth/LoginView'
+import LandingPage from './views/LandingPage'
+import SignupView from './views/auth/SignupView'
 
 import PatientDashboardView from './views/patient/DashboardView'
 import SymptomCheckerView from './views/patient/SymptomCheckerView'
@@ -15,12 +20,17 @@ import HealthRecordView from './views/patient/HealthRecordView'
 import LabResultsView from './views/patient/LabResultsView'
 import LabDetailView from './views/patient/LabDetailView'
 import NotificationsView from './views/patient/NotificationsView'
+import ProfileSetupView from './views/patient/ProfileSetupView'
+import PaymentReturnView from './views/patient/PaymentReturnView'
+import DoctorRatingView from './views/patient/DoctorRatingView'
 
 import DoctorDashboardView from './views/doctor/DoctorDashboardView'
 import PatientQueueView from './views/doctor/PatientQueueView'
 import ScheduleView from './views/doctor/ScheduleView'
 import EMRWorkspaceView from './views/doctor/EMRWorkspaceView'
 import DoctorChatView from './views/doctor/DoctorChatView'
+import LabResultReviewView from './views/doctor/LabResultReviewView'
+import DoctorProfileView from './views/doctor/DoctorProfileView'
 
 import AdminDashboardView from './views/admin/AdminDashboardView'
 import UserManagementView from './views/admin/UserManagementView'
@@ -36,8 +46,39 @@ import AdminSideNav from './components/admin/AdminSideNav'
 import AdminTopBar from './components/admin/AdminTopBar'
 import { AdminSettingsProvider } from './context/AdminSettingsContext'
 
+const AVATAR_GRADIENTS = [
+  { from: 'from-indigo-400', to: 'to-violet-500' },
+  { from: 'from-rose-400', to: 'to-pink-500' },
+  { from: 'from-emerald-400', to: 'to-teal-500' },
+  { from: 'from-amber-400', to: 'to-orange-500' },
+  { from: 'from-sky-400', to: 'to-blue-500' },
+]
+
+function deriveUserMeta(user) {
+  if (!user) return null
+  if (user.initials && user.avatar) return user
+  const name = user.full_name || user.name || user.email || '?'
+  const parts = name.trim().split(/\s+/)
+  const initials = parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : name.slice(0, 2).toUpperCase()
+  let hash = 0
+  for (let i = 0; i < name.length; i++) hash = (hash + (name.codePointAt(i) ?? 0)) % AVATAR_GRADIENTS.length
+  return { ...user, initials, avatar: AVATAR_GRADIENTS[hash] }
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null)
+  const [authPage, setAuthPage] = useState('landing')
+  const [appReady, setAppReady] = useState(false)
+  const [paymentReturn, setPaymentReturn] = useState(() => {
+    const params = new URLSearchParams(globalThis.location.search)
+    const status = params.get('status')
+    const txnRef = params.get('txn_ref')
+    if (!status || !txnRef) return null
+    globalThis.history.replaceState({}, '', globalThis.location.pathname)
+    return { status, txnRef }
+  })
 
   const [dark, setDark] = useState(false)
   const [isTransitioning, setIsTransitioning] = useState(false)
@@ -89,6 +130,58 @@ export default function App() {
     setAdminSidebarSize(size)
     setAdminNavExpanded(size !== 'collapsed')
   }
+
+  // Hydrate currentUser from existing cookie on app init
+  useEffect(() => {
+    authApi.me()
+      .then(async (user) => {
+        if (user?.role === 'patient') {
+          try {
+            const profileData = await patientApi.getProfile()
+            const isComplete = !!(profileData?.profile?.full_name)
+            return { ...user, is_profile_completed: isComplete }
+          } catch {
+            return user
+          }
+        }
+        return user
+      })
+      .then((user) => setCurrentUser(deriveUserMeta(user)))
+      .catch(() => setCurrentUser(null))
+      .finally(() => setAppReady(true))
+  }, [])
+
+  // Connect WebSocket after login, disconnect on logout
+  useEffect(() => {
+    if (!currentUser) return undefined
+    const disconnect = connectWebSocket(currentUser.id, (notification) => {
+      setUnreadCount((c) => c + 1)
+      setOrderNotifications((prev) => [notification, ...prev])
+    })
+    return disconnect
+  }, [currentUser])
+
+  const handleLogout = () => {
+    authApi.logout().catch(() => {})
+    setCurrentUser(null)
+    setPatientView('dashboard')
+    setDoctorView('dashboard')
+    setAdminView('dashboard')
+    setSelectedPatient(null)
+    setSelectedAppointment(null)
+    setSelectedLab(null)
+    setDoctorEmrTab(null)
+    setLabOrders([])
+    setOrderNotifications([])
+    setPaymentReturn(null)
+  }
+
+  // Listen for forced logout triggered by failed token refresh in api/client.js
+  useEffect(() => {
+    const onForceLogout = () => handleLogout()
+    globalThis.addEventListener('auth:logout-required', onForceLogout)
+    return () => globalThis.removeEventListener('auth:logout-required', onForceLogout)
+  })
 
   const navigatePatient = (view) => {
     if (view === patientView) return
@@ -170,16 +263,10 @@ export default function App() {
     setUnreadCount((prev) => prev + 1)
   }
 
-  const createBookingRequest = (bookingInput) => {
-    const booking = {
-      id: `bk-${Date.now()}`,
-      status: 'pending',
-      createdAt: Date.now(),
-      ...bookingInput,
-    }
-
-    setBookings((prev) => [booking, ...prev])
-    setActiveBookingId(booking.id)
+  const createBookingRequest = (appt) => {
+    // appt is now the full API appointment object returned by POST /appointments/
+    setBookings((prev) => [appt, ...prev])
+    setActiveBookingId(appt.id)
     setPatientView('booking-confirmed')
   }
 
@@ -214,36 +301,14 @@ export default function App() {
     }, 180)
   }
 
-  const handleLogin = (email, password) => {
-    const user = findUser(email, password)
-    if (user) {
-      setCurrentUser(user)
-      if (user.role === 'patient') setPatientView('dashboard')
-      if (user.role === 'doctor') setDoctorView('dashboard')
-      if (user.role === 'admin') {
-        setAdminView('dashboard')
-        setAdminNavExpanded(adminSidebarSize !== 'collapsed')
-      }
-      return { success: true }
+  const handleLogin = (user) => {
+    setCurrentUser(deriveUserMeta(user))
+    if (user.role === 'patient') setPatientView('dashboard')
+    if (user.role === 'doctor') setDoctorView('dashboard')
+    if (user.role === 'admin') {
+      setAdminView('dashboard')
+      setAdminNavExpanded(adminSidebarSize !== 'collapsed')
     }
-
-    return {
-      success: false,
-      error: 'Invalid email or password.',
-    }
-  }
-
-  const handleLogout = () => {
-    setCurrentUser(null)
-    setPatientView('dashboard')
-    setDoctorView('dashboard')
-    setAdminView('dashboard')
-    setSelectedPatient(null)
-    setSelectedAppointment(null)
-    setSelectedLab(null)
-    setDoctorEmrTab(null)
-    setLabOrders([])
-    setOrderNotifications([])
   }
 
   function renderPatientView() {
@@ -273,18 +338,30 @@ export default function App() {
         </div>
       ))
 
+    if (paymentReturn && currentUser?.role === 'patient') {
+      return wrap(
+        <PaymentReturnView
+          status={paymentReturn.status}
+          txnRef={paymentReturn.txnRef}
+          onViewAppointments={() => navigatePatient('appointments')}
+          onRetry={() => navigatePatient('booking-wizard')}
+        />,
+      )
+    }
+
     switch (patientView) {
       case 'dashboard':
         return wrap(<PatientDashboardView setCurrentView={navigatePatient} user={currentUser} labOrders={labOrders} />)
       case 'symptom-checker':
         return wrap(<SymptomCheckerView setCurrentView={navigatePatient} />)
       case 'booking-wizard':
-        return wrap(<BookingWizardView setCurrentView={navigatePatient} onSubmitBooking={createBookingRequest} />)
+        return wrap(<BookingWizardView setCurrentView={navigatePatient} onSubmitBooking={createBookingRequest} currentUser={currentUser} />)
       case 'booking-confirmed':
         return wrap(
           <BookingConfirmedView
             setCurrentView={navigatePatient}
             booking={bookings.find((item) => item.id === activeBookingId) || null}
+            wsNotifications={orderNotifications}
           />,
         )
       case 'appointments':
@@ -292,17 +369,21 @@ export default function App() {
           <AppointmentsView
             setCurrentView={navigatePatient}
             setSelectedAppointment={setSelectedAppointment}
-            bookings={bookings}
+            currentUser={currentUser}
+            onRateDoctor={(appt) => {
+              setSelectedAppointment(appt)
+              navigatePatient('rating')
+            }}
           />,
         )
       case 'reschedule':
-        return wrap(<RescheduleView setCurrentView={navigatePatient} selectedAppointment={selectedAppointment} />)
+        return wrap(<RescheduleView setCurrentView={navigatePatient} selectedAppointment={selectedAppointment} currentUser={currentUser} />)
       case 'reschedule-confirmed':
         return wrap(<RescheduleConfirmedView setCurrentView={navigatePatient} />)
       case 'health-record':
-        return wrap(<HealthRecordView setCurrentView={navigatePatient} />)
+        return wrap(<HealthRecordView setCurrentView={navigatePatient} currentUser={currentUser} />)
       case 'lab-results':
-        return wrap(<LabResultsView setCurrentView={navigatePatient} setSelectedLab={setSelectedLab} labOrders={labOrders} />)
+          return wrap(<LabResultsView setCurrentView={navigatePatient} setSelectedLab={setSelectedLab} labOrders={labOrders} currentUser={currentUser} />)
       case 'lab-detail':
         return wrap(<LabDetailView setCurrentView={navigatePatient} selectedLab={selectedLab} />)
       case 'notifications':
@@ -315,10 +396,30 @@ export default function App() {
             setOrderNotifications={setOrderNotifications}
             bookingNotifications={bookingNotifications}
             setBookingNotifications={setBookingNotifications}
+            currentUser={currentUser}
+          />,
+        )
+      case 'profile-setup':
+        return wrap(<ProfileSetupView setCurrentView={navigatePatient} currentUser={currentUser} />)
+      case 'payment-return':
+        return wrap(
+          <PaymentReturnView
+            status={paymentReturn?.status}
+            txnRef={paymentReturn?.txnRef}
+            onViewAppointments={() => navigatePatient('appointments')}
+            onRetry={() => navigatePatient('booking-wizard')}
+          />,
+        )
+      case 'rating':
+        return wrap(
+          <DoctorRatingView
+            appointment={selectedAppointment}
+            onDone={() => navigatePatient('appointments')}
+            onSkip={() => navigatePatient('appointments')}
           />,
         )
       default:
-        return wrap(<PatientDashboardView setCurrentView={navigatePatient} user={currentUser} />)
+        return wrap(<PatientDashboardView setCurrentView={navigatePatient} user={currentUser} labOrders={labOrders} />)
     }
   }
 
@@ -389,6 +490,17 @@ export default function App() {
         )
       case 'doctor-chat':
         return wrap(<DoctorChatView navigateTo={navigateDoctor} user={currentUser} selectedPatient={selectedPatient} />)
+      case 'lab-review':
+        return wrap(
+          <LabResultReviewView
+            labOrders={labOrders}
+            setLabOrders={setLabOrders}
+            onNotify={(notification) => setOrderNotifications((prev) => [notification, ...prev])}
+            onBack={() => navigateDoctor('dashboard')}
+          />,
+        )
+      case 'profile':
+        return wrap(<DoctorProfileView navigateTo={navigateDoctor} user={currentUser} />)
       default:
         return wrap(<DoctorDashboardView navigateTo={navigateDoctor} user={currentUser} setSelectedPatient={setSelectedPatient} selectedPatient={selectedPatient} />)
     }
@@ -434,19 +546,70 @@ export default function App() {
     }
   }
 
+  const appStyle = {
+    fontFamily: "'Inter', -apple-system, sans-serif",
+    WebkitFontSmoothing: 'antialiased',
+  }
+
+  // ── Loading spinner (no scroll lock needed) ────────────────────────────────
+  if (!appReady) {
+    return (
+      <div className={`${dark ? 'dark' : ''} flex h-screen w-full items-center justify-center bg-[#f8fafc] dark:bg-[#08080f]`} style={appStyle}>
+        <span className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-indigo-600" aria-label="Loading" />
+      </div>
+    )
+  }
+
+  // ── Unauthenticated pages — rendered outside the scroll-locked shell ────────
+  if (!currentUser) {
+    if (authPage === 'landing') {
+      return (
+        <div className={dark ? 'dark' : ''} style={appStyle}>
+          <LandingPage
+            onLogin={() => setAuthPage('login')}
+            onSignup={() => setAuthPage('signup')}
+          />
+        </div>
+      )
+    }
+    if (authPage === 'signup') {
+      return (
+        <div style={appStyle}>
+          <SignupView
+            dark={dark}
+            setDark={setDark}
+            onSuccess={() => setAuthPage('login')}
+            onLoginClick={() => setAuthPage('login')}
+          />
+        </div>
+      )
+    }
+    return (
+      <div style={appStyle}>
+        <LoginView
+          dark={dark}
+          setDark={setDark}
+          onLogin={handleLogin}
+          onSignupClick={() => setAuthPage('signup')}
+        />
+      </div>
+    )
+  }
+
+  // ── Authenticated app shell (scroll-locked sidebar layout) ─────────────────
   return (
     <div
       className={`${dark ? 'dark' : ''} flex h-screen overflow-hidden overflow-x-hidden w-full max-w-full`}
-      style={{
-        fontFamily: "'Inter', -apple-system, sans-serif",
-        WebkitFontSmoothing: 'antialiased',
-      }}
+      style={appStyle}
     >
-      {!currentUser && (
-        <LoginView dark={dark} setDark={setDark} onLogin={handleLogin} />
+      {currentUser?.role === 'patient' && !currentUser?.is_profile_completed && (
+        <ProfileSetupView
+          currentUser={currentUser}
+          onComplete={(updatedUser) => setCurrentUser(deriveUserMeta({ ...currentUser, ...updatedUser, is_profile_completed: true }))}
+        />
       )}
 
-      {currentUser?.role === 'patient' && (
+      {currentUser?.role === 'patient' && currentUser?.is_profile_completed && (
         <>
           <PatientSideNav
             expanded={patientNavExpanded}
@@ -468,6 +631,7 @@ export default function App() {
               navigateTo={navigatePatient}
               setMobileOpen={setPatientMobileOpen}
               unreadCount={unreadCount}
+              setUnreadCount={setUnreadCount}
               user={currentUser}
             />
 
