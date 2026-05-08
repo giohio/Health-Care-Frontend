@@ -2,7 +2,7 @@ export const USERS = [
   {
     id: 'u001',
     email: 'jane.doe@email.com',
-    password: 'patient123',
+    passcode: 'patient123',
     role: 'patient',
     name: 'Jane Doe',
     initials: 'JD',
@@ -14,7 +14,7 @@ export const USERS = [
   {
     id: 'u002',
     email: 'dr.chen@healthai.vn',
-    password: 'doctor123',
+    passcode: 'doctor123',
     role: 'doctor',
     name: 'Dr. Sarah Chen',
     initials: 'SC',
@@ -27,7 +27,7 @@ export const USERS = [
   {
     id: 'u003',
     email: 'dr.reid@healthai.vn',
-    password: 'doctor123',
+    passcode: 'doctor123',
     role: 'doctor',
     name: 'Dr. Marcus Reid',
     initials: 'MR',
@@ -37,6 +37,18 @@ export const USERS = [
       to: 'to-indigo-500',
     },
   },
+  {
+    id: 'u004',
+    email: 'admin@healthai.vn',
+    passcode: 'admin123',
+    role: 'admin',
+    name: 'Nguyen Van Admin',
+    initials: 'NA',
+    avatar: {
+      from: 'from-rose-400',
+      to: 'to-orange-500',
+    },
+  },
 ]
 
 export const findUser = (email, password) => {
@@ -44,6 +56,6 @@ export const findUser = (email, password) => {
     (u) =>
       u.email.toLowerCase() ===
         email.toLowerCase() &&
-      u.password === password,
+      u.passcode === password,
   ) || null
 }

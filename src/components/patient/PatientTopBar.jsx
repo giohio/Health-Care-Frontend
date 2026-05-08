@@ -1,8 +1,11 @@
+import { useEffect } from 'react'
 import PropTypes from 'prop-types'
+import { notificationApi } from '../../api/notification'
 
 const VIEW_LABELS = {
   dashboard: 'Dashboard',
   appointments: 'My Appointments',
+  'payment-history': 'Payment History',
   'lab-results': 'Lab Results',
   'lab-detail': 'Lab Results',
   'health-record': 'Health Record',
@@ -10,6 +13,7 @@ const VIEW_LABELS = {
   'booking-wizard': 'Book Appointment',
   'symptom-checker': 'Symptom Checker',
   reschedule: 'Reschedule',
+  'reschedule-confirmed': 'Appointment Details',
 }
 
 function MenuIcon() {
@@ -48,11 +52,40 @@ function ChevronDownIcon() {
   )
 }
 
-export default function PatientTopBar({ setMobileOpen, currentView, unreadCount, navigateTo, user }) {
+export default function PatientTopBar(props) {
+  const {
+    setMobileOpen,
+    currentView,
+    unreadCount,
+    setUnreadCount,
+    navigateTo,
+    user,
+  } = props
+
   const currentLabel = VIEW_LABELS[currentView] || 'HealthAI Portal'
+  const avatarFrom = user?.avatar?.from ?? 'from-indigo-500'
+  const avatarTo = user?.avatar?.to ?? 'to-violet-600'
+  const initials = user?.initials ?? (user?.email?.[0]?.toUpperCase() ?? 'U')
+  const displayName = user?.name ?? user?.email ?? 'User'
+
+  useEffect(() => {
+    async function fetchUnread() {
+      try {
+        const res = await notificationApi.getUnreadCount()
+        const count = res?.count ?? res?.unread_count ?? 0
+        setUnreadCount(count)
+      } catch {
+        return
+      }
+    }
+
+    fetchUnread()
+    const interval = setInterval(fetchUnread, 60000)
+    return () => clearInterval(interval)
+  }, [setUnreadCount])
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
+    <header className="app-root sticky top-0 z-30 flex h-14 items-center gap-4 border-b border-slate-200/80 bg-white/80 px-4 backdrop-blur-xl dark:border-[#1e1e28]/80 dark:bg-[#0c0c13]/85 md:px-6" role="banner">
       <div className="flex flex-shrink-0 items-center gap-3">
         <button
           type="button"
@@ -60,7 +93,9 @@ export default function PatientTopBar({ setMobileOpen, currentView, unreadCount,
           onClick={() => setMobileOpen(true)}
           aria-label="Open navigation"
         >
-          <span className="inline-flex h-[18px] w-[18px]"><MenuIcon /></span>
+          <span className="inline-flex h-[18px] w-[18px]">
+            <MenuIcon />
+          </span>
         </button>
 
         <div className="hidden items-center text-sm md:inline-flex">
@@ -72,7 +107,9 @@ export default function PatientTopBar({ setMobileOpen, currentView, unreadCount,
 
       <div className="min-w-0 flex-1">
         <label className="flex h-9 max-w-md items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3 text-slate-600 transition-all duration-150 hover:border-slate-300 dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#eeeef5] dark:hover:border-[#353545]">
-          <span className="inline-flex h-4 w-4 text-slate-400 dark:text-[#606070]" aria-hidden="true"><SearchIcon /></span>
+          <span className="inline-flex h-4 w-4 text-slate-400 dark:text-[#606070]" aria-hidden="true">
+            <SearchIcon />
+          </span>
           <input
             type="text"
             placeholder="Search records, appointments..."
@@ -89,9 +126,13 @@ export default function PatientTopBar({ setMobileOpen, currentView, unreadCount,
           onClick={() => navigateTo('notifications')}
           aria-label="Open notifications"
         >
-          <span className={`inline-flex h-[18px] w-[18px] ${
-            currentView === 'notifications' ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-500 dark:text-[#70708a]'
-          }`}>
+          <span
+            className={`inline-flex h-[18px] w-[18px] ${
+              currentView === 'notifications'
+                ? 'text-indigo-600 dark:text-indigo-400'
+                : 'text-slate-500 dark:text-[#70708a]'
+            }`}
+          >
             <BellIcon />
           </span>
           {unreadCount > 0 && (
@@ -109,11 +150,13 @@ export default function PatientTopBar({ setMobileOpen, currentView, unreadCount,
           onClick={() => navigateTo('health-record')}
           aria-label="Open health record"
         >
-          <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-semibold text-white ${user.avatar.from} ${user.avatar.to}`}>
-            {user.initials}
+          <span className={`inline-flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br text-[11px] font-semibold text-white ${avatarFrom} ${avatarTo}`}>
+            {initials}
           </span>
-          <span className="hidden text-sm font-medium text-slate-900 dark:text-[#eeeef5] lg:inline">{user.name}</span>
-          <span className="hidden h-[14px] w-[14px] text-slate-400 dark:text-[#606070] lg:inline-flex"><ChevronDownIcon /></span>
+          <span className="hidden text-sm font-medium text-slate-900 dark:text-[#eeeef5] lg:inline">{displayName}</span>
+          <span className="hidden h-[14px] w-[14px] text-slate-400 dark:text-[#606070] lg:inline-flex">
+            <ChevronDownIcon />
+          </span>
         </button>
       </div>
     </header>
@@ -124,13 +167,19 @@ PatientTopBar.propTypes = {
   setMobileOpen: PropTypes.func.isRequired,
   currentView: PropTypes.string.isRequired,
   unreadCount: PropTypes.number.isRequired,
+  setUnreadCount: PropTypes.func.isRequired,
   navigateTo: PropTypes.func.isRequired,
   user: PropTypes.shape({
-    name: PropTypes.string.isRequired,
-    initials: PropTypes.string.isRequired,
+    name: PropTypes.string,
+    email: PropTypes.string,
+    initials: PropTypes.string,
     avatar: PropTypes.shape({
-      from: PropTypes.string.isRequired,
-      to: PropTypes.string.isRequired,
-    }).isRequired,
-  }).isRequired,
+      from: PropTypes.string,
+      to: PropTypes.string,
+    }),
+  }),
+}
+
+PatientTopBar.defaultProps = {
+  user: null,
 }

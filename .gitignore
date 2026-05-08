@@ -22,3 +22,32 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# AI / Agent tools
+.agents/
+.augment/
+brain/
+
+# Graphify output
+graphify-out/
+
+# LaTeX files (thesis / docs lẫn vào frontend)
+*.tex
+*.aux
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.bbl
+*.blg
+
+# OpenAPI & config JSON exports (generated)
+*_openapi.json
+*openapi*.json
+
+# Lock files từ AI tools
+skills-lock.json
+
+# API Integration docs (generated / không cần track)
+Api_Integration_Fe.md

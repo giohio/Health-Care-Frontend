@@ -113,7 +113,6 @@ src/
 ![Login Screen](./src/assets/image.png)
 
 ### Patient - AI Checker
-
 ![Patient AI Checker](./src/assets/image2.png)
 
 ### Patient - Appointment Booking
