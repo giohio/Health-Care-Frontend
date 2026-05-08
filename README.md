@@ -1,126 +1,111 @@
-# HealthAI Portal (Frontend Demo)
+<div align="center">
+  <h1>🏥 HealthAI Clinical OS (Frontend)</h1>
+  <p><i>A Next-Generation Role-Based Healthcare Portal</i></p>
+</div>
 
-A role-based healthcare frontend demo built with React + Vite.
+<br />
 
-This project is currently a frontend-only demo (mock auth + mock data), combining both patient and doctor experiences in a single SPA.
+## 📖 About The Project
 
-## Overview
+HealthAI Portal is a modern, single-page application (SPA) designed to bridge the gap between patients and healthcare providers. Built with **React 19** and **Vite**, it delivers a blazing-fast, responsive, and deeply integrated experience.
 
-- Single entry point and single app root.
-- Role-based login flow for patient and doctor.
-- Patient portal flows:
-	- Dashboard
-	- AI Symptom Checker
-	- Appointment booking and confirmation
-	- Appointment rescheduling flow
-	- Lab results and health records
-	- Notifications
-- Doctor portal flows:
-	- Clinical dashboard
-	- Patient queue
-	- Schedule
-	- EMR workspace (placeholder view)
-	- Doctor chat (placeholder view)
-- Light/dark mode support.
+Originally conceived as a frontend prototype, this repository now serves as the **main presentation layer** for the HealthAI Microservices ecosystem, integrating seamlessly via our Kong API Gateway.
 
-## Tech Stack
+## ✨ Key Features
 
-- React 19
-- Vite 8
-- PropTypes
-- Tailwind CSS (project styling utilities)
-- ESLint
+### 🧑‍⚕️ For Doctors (Clinical Workspace)
+*   **Smart Queue Management:** Real-time patient queue with lab readiness indicators.
+*   **AI-Powered Clinical Assist:** Ask questions and get differential diagnoses backed by RAG and clinical guidelines.
+*   **HITL Lab Review:** Human-in-the-loop workflow for reviewing AI-drafted lab results.
+*   **Automated EMR Summaries:** Streaming SSE summaries of patient history before consultations.
 
-## Getting Started
+### 🤒 For Patients (Health Portal)
+*   **Intelligent Triage:** AI Symptom Checker that conducts dynamic interviews and recommends the right medical specialty.
+*   **Seamless Booking:** Real-time slot booking with integrated VNPAY payment gateway.
+*   **Digital Health Records:** Secure access to clinical summaries, prescriptions, and lab results.
+*   **Smart Notifications:** Real-time WebSocket updates for appointment status and lab results.
 
-### 1. Install dependencies
+## 🛠 Tech Stack
+
+*   **Core:** React 19, Vite 8
+*   **Styling:** Tailwind CSS (Custom utility classes for pristine UI)
+*   **State Management & Data Fetching:** React Hooks, Async/Await
+*   **Code Quality:** ESLint, PropTypes
+
+---
+
+## 📸 System Interfaces
+
+### Patient Portal
+<div align="center">
+  <img src="./src/assets/image.png" alt="Login Screen" width="800"/>
+  <br/>
+  <em>Secure Role-Based Authentication</em>
+</div>
+<br/>
+<div align="center">
+  <img src="./src/assets/image2.png" alt="Patient AI Checker" width="800"/>
+  <br/>
+  <em>AI Symptom Checker & Triage</em>
+</div>
+<br/>
+<div align="center">
+  <img src="./src/assets/image3.png" alt="Patient Appointment Booking" width="800"/>
+  <br/>
+  <em>Real-time Appointment Booking</em>
+</div>
+
+### Clinical & Administrative Interfaces
+*(Latest System Updates)*
+<div align="center">
+  <img src="./src/assets/White_4.4.png" alt="System Interface 1" width="800"/>
+</div>
+<br/>
+<div align="center">
+  <img src="./src/assets/White_4.5.png" alt="System Interface 2" width="800"/>
+</div>
+<br/>
+<div align="center">
+  <img src="./src/assets/White_4.6.png" alt="System Interface 3" width="800"/>
+</div>
+
+---
+
+## 🚀 Getting Started
+
+### 1. Installation
 
 ```bash
+# Clone the repository and install dependencies
 npm install
 ```
 
-### 2. Run in development
+### 2. Local Development
 
 ```bash
 npm run dev
+# The app will be available at http://localhost:5173
 ```
 
-Default local URL:
-
-```text
-http://localhost:5173
-```
-
-### 3. Build for production
+### 3. Production Build
 
 ```bash
 npm run build
-```
-
-### 4. Preview production build
-
-```bash
 npm run preview
 ```
 
-## Available Scripts
+## 🔄 Development Workflow
 
-- `npm run dev`: Start dev server.
-- `npm run build`: Build production bundle.
-- `npm run preview`: Preview production build.
-- `npm run lint`: Run ESLint.
+### Branching Strategy
+*   `main`: Stable, production-ready code.
+*   `develop`: Main integration branch.
+*   `feature/*`: Feature development and bug fixes.
 
-## Demo Credentials
+### Automated CI/CD
+Every push to a `feature/*` branch automatically triggers a GitHub Action to create a Pull Request against the `develop` branch, ensuring a streamlined and peer-reviewed integration process.
 
-These credentials are stored in `src/data/users.js` for demo purposes.
-
-### Patient Demo
-
-- Email: `jane.doe@email.com`
-- Password: `patient123`
-
-### Doctor Demo
-
-- Email: `dr.chen@healthai.vn`
-- Password: `doctor123`
-
-Alternative doctor account:
-
-- Email: `dr.reid@healthai.vn`
-- Password: `doctor123`
-
-## Project Structure
-
-```text
-src/
-	App.jsx
-	data/
-		users.js
-	views/
-		auth/
-		patient/
-		doctor/
-	components/
-		shared/
-		patient/
-		doctor/
-```
-
-## Demo Screenshots
-
-### Login Screen
-
-![Login Screen](./src/assets/image.png)
-
-### Patient - AI Checker
-![Patient AI Checker](./src/assets/image2.png)
-
-### Patient - Appointment Booking
-
-![Patient Appointment Booking](./src/assets/image3.png)
-
-## Notes
-
-- This repository is frontend-only for now.
-- Authentication and user data are mocked locally.
-- Backend integration can be added in a later phase.
+## 🧪 Demo Credentials (Local Dev)
+If running without the backend gateway, you can use these mocked credentials:
+*   **Patient:** `jane.doe@email.com` / `patient123`
+*   **Doctor 1:** `dr.chen@healthai.vn` / `doctor123`
+*   **Doctor 2:** `dr.reid@healthai.vn` / `doctor123`
