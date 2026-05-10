@@ -5,6 +5,7 @@ import { appointmentApi } from '../../../api/appointment'
 import { emrApi } from '../../../api/emr'
 import { aiApi } from '../../../api/ai'
 import { paymentApi } from '../../../api/payment'
+import { patientApi } from '../../../api/patient'
 import { APPOINTMENT_STATUS, ORDER_PRIORITY } from '../../../constants/enums'
 
 import PatientContextSidebar from './PatientContextSidebar'
@@ -12,6 +13,99 @@ import ClinicalActivityCenter from './ClinicalActivityCenter'
 import SoapNoteEditor from './SoapNoteEditor'
 import { SOAP_SECTIONS_CONFIG, LAB_TESTS, LAB_TEST_GROUPS, ICD_DATABASE, SOAP_AI_NOTE, DEFAULT_LAB_PRICES } from './EmrData'
 import { resolveSuggestedTestIds } from './labSuggestionMapping'
+
+function normalizeAllergies(value) {
+  if (!value) return []
+
+  const items = Array.isArray(value) ? value : String(value).split(';')
+  return items.map((item) => {
+    if (!item) return null
+
+    if (typeof item === 'object') {
+      return {
+        name: item.name || item.allergen || 'Unknown',
+        severity: item.severity || 'Moderate',
+        reaction: item.reaction || item.notes || '',
+      }
+    }
+
+    const text = String(item).trim()
+    if (!text) return null
+
+    const match = text.match(/^(.+?)\s*\(([^)]+)\):\s*(.+)$/)
+    if (match) {
+      return {
+        name: match[1].trim(),
+        severity: match[2].trim() || 'Moderate',
+        reaction: match[3].trim(),
+      }
+    }
+
+    return {
+      name: text,
+      severity: text.toLowerCase().includes('severe') ? 'Severe' : 'Moderate',
+      reaction: '',
+    }
+  }).filter(Boolean)
+}
+
+function normalizeVitals(value) {
+  const source = value?.vitals && typeof value.vitals === 'object' ? value.vitals : value
+  if (!source || typeof source !== 'object') return null
+
+  const systolic = source.blood_pressure_systolic ?? source.systolic
+  const diastolic = source.blood_pressure_diastolic ?? source.diastolic
+  const bloodPressure = source.blood_pressure ?? (
+    systolic && diastolic ? `${systolic}/${diastolic}` : null
+  )
+
+  return {
+    blood_pressure: bloodPressure,
+    temperature: source.temperature ?? source.temperature_celsius ?? null,
+    heart_rate: source.heart_rate ?? source.heart_rate_bpm ?? null,
+    spo2: source.spo2 ?? source.oxygen_saturation ?? null,
+    height_cm: source.height_cm ?? null,
+    weight_kg: source.weight_kg ?? null,
+    recorded_at: source.recorded_at ?? null,
+  }
+}
+
+function buildVitalsQuery(input) {
+  const query = {}
+  const bp = String(input.blood_pressure || '').trim()
+  const bpMatch = bp.match(/^(\d{2,3})\s*\/\s*(\d{2,3})$/)
+  if (bpMatch) {
+    query.blood_pressure_systolic = bpMatch[1]
+    query.blood_pressure_diastolic = bpMatch[2]
+  }
+  if (input.heart_rate !== '') query.heart_rate = input.heart_rate
+  if (input.temperature !== '') query.temperature_celsius = input.temperature
+  if (input.spo2 !== '') query.oxygen_saturation = input.spo2
+  if (input.height_cm !== '') query.height_cm = input.height_cm
+  if (input.weight_kg !== '') query.weight_kg = input.weight_kg
+  return query
+}
+
+function buildSoapContent(sections) {
+  return Object.entries(sections).map(([key, value]) => `${key.toUpperCase()}: ${value}`).join('\n\n')
+}
+
+function parseSoapContent(content) {
+  const sections = { s: '', o: '', a: '', p: '' }
+  String(content || '').split(/\n\n+/).forEach((block) => {
+    const match = block.match(/^([SOAP]):\s*/i)
+    if (match) {
+      sections[match[1].toLowerCase()] = block.replace(/^[SOAP]:\s*/i, '').trim()
+    }
+  })
+  return sections
+}
+
+function normalizeNoteType(template) {
+  if (template === 'soap') return 'soap'
+  if (template === 'summary') return 'summary'
+  return 'progress'
+}
 
 export default function EMRWorkspace({
   navigateTo,
@@ -36,6 +130,9 @@ export default function EMRWorkspace({
   const [icdCodes, setIcdCodes] = useState([])
   const [lastSaved, setLastSaved] = useState('Not saved')
   const [isAiGenerating, setIsAiGenerating] = useState(false)
+  const [savedNoteIds, setSavedNoteIds] = useState({})
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
+  const [latestSummaryContent, setLatestSummaryContent] = useState('')
 
   // Results State
   const [resultsSubTab, setResultsSubTab] = useState('ALL')
@@ -55,14 +152,10 @@ export default function EMRWorkspace({
   const [suggestLabResult, setSuggestLabResult] = useState(null)
   const [suggestLabLoading, setSuggestLabLoading] = useState(false)
   const [suggestLabError, setSuggestLabError] = useState(null)
-
-  // Mock Vitals
-  const vitals = {
-    blood_pressure: '118/76',
-    temperature: '38.2',
-    heart_rate: '84',
-    spo2: '98'
-  }
+  const [vitals, setVitals] = useState(null)
+  const [vitalsLoading, setVitalsLoading] = useState(false)
+  const [vitalsSaving, setVitalsSaving] = useState(false)
+  const [vitalsError, setVitalsError] = useState(null)
 
   // --- Helpers ---
   // Normalize patient: PatientQueueView passes raw booking (has `patient_name`),
@@ -73,6 +166,7 @@ export default function EMRWorkspace({
     ? {
         ..._rawPatient,
         name: _resolvedName,
+        allergies: normalizeAllergies(_rawPatient.allergies),
         initials: _rawPatient.initials
           ?? (_resolvedName
             ? _resolvedName.split(' ').filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase()
@@ -83,7 +177,58 @@ export default function EMRWorkspace({
   const patientUserId = explicitPatientId ?? (patient.appointment_id ? patient.id : null)
   const apptId = patient.appointment_id ?? (explicitPatientId && patient.id !== explicitPatientId ? patient.id : null)
 
-  const severeAllergies = patient.allergies ? patient.allergies.filter((item) => item.severity?.toLowerCase().includes('severe')) : []
+  const severeAllergies = patient.allergies.filter((item) => item.severity?.toLowerCase().includes('severe'))
+
+  const fetchVitals = useCallback(() => {
+    const fallback = normalizeVitals(patient.vitals_latest || patient.vital_signs || patient.profile?.vital_signs)
+    if (!patientUserId) {
+      setVitals(fallback)
+      return Promise.resolve(fallback)
+    }
+
+    setVitalsLoading(true)
+    setVitalsError(null)
+    return patientApi.getLatestVitals(patientUserId)
+      .then((data) => {
+        const nextVitals = normalizeVitals(data) || fallback
+        setVitals(nextVitals)
+        return nextVitals
+      })
+      .catch((err) => {
+        setVitals(fallback)
+        setVitalsError(err?.message || 'Failed to load vitals')
+        return fallback
+      })
+      .finally(() => setVitalsLoading(false))
+  }, [patient.profile?.vital_signs, patient.vital_signs, patient.vitals_latest, patientUserId])
+
+  const handleSaveVitals = useCallback(async (input) => {
+    if (!patientUserId) return false
+
+    const query = buildVitalsQuery(input)
+    if (Object.keys(query).length === 0) {
+      setVitalsError('Enter at least one vital sign')
+      return false
+    }
+
+    setVitalsSaving(true)
+    setVitalsError(null)
+    try {
+      const saved = await patientApi.postVitals(patientUserId, query)
+      setVitals(normalizeVitals(saved))
+      await fetchVitals()
+      return true
+    } catch (err) {
+      setVitalsError(err?.message || 'Failed to save vitals')
+      throw err
+    } finally {
+      setVitalsSaving(false)
+    }
+  }, [fetchVitals, patientUserId])
+
+  useEffect(() => {
+    fetchVitals()
+  }, [fetchVitals])
   
   // Fetch real lab data for this patient
   const fetchLabData = useCallback(() => {
@@ -124,6 +269,47 @@ export default function EMRWorkspace({
   useEffect(() => {
     fetchLabData()
   }, [fetchLabData])
+
+  const loadClinicalNotes = useCallback(() => {
+    if (!patientUserId) {
+      setSavedNoteIds({})
+      setLatestSummaryContent('')
+      return Promise.resolve([])
+    }
+
+    return clinicalApi.getNotes(patientUserId, apptId ? { appointment_id: apptId } : {})
+      .then((notes) => {
+        const list = Array.isArray(notes) ? notes : []
+        const sorted = [...list].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+        const nextIds = {}
+        sorted.forEach((note) => {
+          const type = normalizeNoteType(note.note_type)
+          if (!nextIds[type]) nextIds[type] = note.id
+        })
+        setSavedNoteIds(nextIds)
+
+        const latestSoap = sorted.find((note) => normalizeNoteType(note.note_type) === 'soap' && note.content)
+        if (latestSoap) {
+          const sections = parseSoapContent(latestSoap.content)
+          if (Object.values(sections).some(Boolean)) setSoapSections(sections)
+          setLastSaved(`${new Date(latestSoap.created_at || Date.now()).toLocaleTimeString()} — last saved`)
+        }
+
+        const latestSummary = sorted.find((note) => normalizeNoteType(note.note_type) === 'summary' && note.content)
+        setLatestSummaryContent(latestSummary?.content || '')
+        return sorted
+      })
+      .catch((err) => {
+        console.error('Failed to load clinical notes:', err)
+        setSavedNoteIds({})
+        setLatestSummaryContent('')
+        return []
+      })
+  }, [apptId, patientUserId])
+
+  useEffect(() => {
+    loadClinicalNotes()
+  }, [loadClinicalNotes])
 
   // Poll every 8 s while any result is still being processed by AI
   const hasProcessing = useMemo(
@@ -229,28 +415,50 @@ export default function EMRWorkspace({
     }
   }
 
+  const saveClinicalNote = useCallback(async ({ content, noteType, isAiGenerated = false }) => {
+    if (!content?.trim()) return null
+    if (!patientUserId || !user?.id) throw new Error('Missing patient or doctor context')
+
+    const normalizedType = normalizeNoteType(noteType)
+    const existingId = savedNoteIds[normalizedType]
+    const saved = existingId
+      ? await clinicalApi.updateNote(existingId, { content })
+      : await clinicalApi.createNote(patientUserId, {
+          content,
+          note_type: normalizedType,
+          appointment_id: apptId || undefined,
+          doctor_id: user.id,
+          is_ai_generated: isAiGenerated,
+        })
+
+    if (saved?.id) {
+      setSavedNoteIds((current) => ({ ...current, [normalizedType]: saved.id }))
+    }
+    if (normalizedType === 'summary') setLatestSummaryContent(content)
+    setHistoryRefreshKey((value) => value + 1)
+    return saved
+  }, [apptId, patientUserId, savedNoteIds, user?.id])
+
   const handleSaveNote = useCallback(async () => {
-    const contentToSave = noteTemplate === 'soap' 
-      ? Object.entries(soapSections).map(([k, v]) => `${k.toUpperCase()}: ${v}`).join('\n\n')
+    const contentToSave = noteTemplate === 'soap'
+      ? buildSoapContent(soapSections)
       : noteText
-      
-    if (!patientUserId || !contentToSave.trim()) return
+
+    if (!contentToSave.trim()) return
 
     try {
       setLastSaved('Saving...')
-      const res = await clinicalApi.createNote(patientUserId, {
+      const res = await saveClinicalNote({
         content: contentToSave,
-        note_type: noteTemplate,
-        appointment_id: apptId || undefined,
-        doctor_id: user?.id
+        noteType: normalizeNoteType(noteTemplate),
       })
-      console.log('Saved note ID:', res.id)
+      if (res?.id) console.log('Saved note ID:', res.id)
       setLastSaved(`Saved at ${new Date().toLocaleTimeString()}`)
     } catch (err) {
       console.error('Save failed:', { err, patientUserId, apptId, selectedPatient })
       setLastSaved('Error saving')
     }
-  }, [noteTemplate, soapSections, noteText, patientUserId, apptId, selectedPatient, user])
+  }, [noteTemplate, soapSections, noteText, patientUserId, apptId, selectedPatient, saveClinicalNote])
 
   const filterIcdResults = (query) => {
     const q = query.toLowerCase()
@@ -406,8 +614,22 @@ export default function EMRWorkspace({
       <div className="flex flex-1 overflow-hidden">
         {/* Pane 1: Context — collapsible */}
         <PatientContextSidebar
+          key={patientUserId || patient.name}
           patient={patient}
           vitals={vitals}
+          vitalsLoading={vitalsLoading}
+          vitalsSaving={vitalsSaving}
+          vitalsError={vitalsError}
+          onSaveVitals={handleSaveVitals}
+          onSaveSummary={async (content) => {
+            if (!content?.trim()) return null
+            return saveClinicalNote({
+              content,
+              noteType: 'summary',
+              isAiGenerated: true,
+            })
+          }}
+          initialSummaryContent={latestSummaryContent}
           activeMedications={[]}
           severeAllergies={severeAllergies}
           sidebarCollapsed={sidebarCollapsed}
@@ -425,6 +647,7 @@ export default function EMRWorkspace({
           setResultsSubTab={setResultsSubTab}
           apptId={apptId}
           patientName={patient.name}
+          historyRefreshKey={historyRefreshKey}
           onLabResultUpdate={fetchLabData}
           orderStep={orderStep}
           setOrderStep={setOrderStep}
@@ -494,13 +717,25 @@ export default function EMRWorkspace({
                 patientId: patientUserId,
                 triageSessionId: patient.triage_session_id
               })
-              setSoapSections({
+              const nextSections = {
                 s: draft.s || '',
                 o: draft.o || '',
                 a: draft.a || '',
                 p: draft.p || ''
-              })
-              setLastSaved('AI Draft generated')
+              }
+              setSoapSections(nextSections)
+              setLastSaved('AI Draft generated, saving...')
+              try {
+                await saveClinicalNote({
+                  content: buildSoapContent(nextSections),
+                  noteType: 'soap',
+                  isAiGenerated: true,
+                })
+                setLastSaved(`AI Draft saved at ${new Date().toLocaleTimeString()}`)
+              } catch (saveErr) {
+                console.error('AI Draft save failed:', saveErr)
+                setLastSaved('AI Draft generated, save failed')
+              }
             } catch (err) {
               console.error('AI Draft failed:', err)
               setLastSaved('AI Draft failed')

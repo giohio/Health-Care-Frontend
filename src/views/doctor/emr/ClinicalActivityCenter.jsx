@@ -25,6 +25,7 @@ export default function ClinicalActivityCenter({
   apptId,
   patientName,
   selectedPatient,
+  historyRefreshKey,
   onLabResultUpdate,
   onNotify,
   // order wizard props
@@ -235,7 +236,7 @@ export default function ClinicalActivityCenter({
         )}
 
         {emrTab === 'history' && (
-          <MedicalHistoryTab patientId={selectedPatient?.patient_id || selectedPatient?.id} />
+          <MedicalHistoryTab patientId={selectedPatient?.patient_id || selectedPatient?.id} refreshKey={historyRefreshKey} />
         )}
 
         {emrTab === 'results' && (
@@ -855,6 +856,7 @@ ClinicalActivityCenter.propTypes = {
   selectedMaxTatMinutes: PropTypes.number,
   setSelectedMaxTatMinutes: PropTypes.func,
   selectedPatient: PropTypes.object,
+  historyRefreshKey: PropTypes.number,
   suggestLabResult: PropTypes.object,
   setSuggestLabResult: PropTypes.func,
   suggestLabLoading: PropTypes.bool,

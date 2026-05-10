@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import PropTypes from 'prop-types'
 import { IconMapPin, IconCalendar, IconStar } from '../../../icons'
-import { APPOINTMENT_STATUS, APPT_STATUS_LABEL, APPT_STATUS_COLOR } from '../../../constants/enums'
+import { APPOINTMENT_STATUS, APPT_STATUS_LABEL, APPT_STATUS_COLOR, PAYMENT_STATUS } from '../../../constants/enums'
 import { paymentApi } from '../../../api/payment'
 
 function IconClock() {
@@ -29,8 +29,6 @@ export default function UpcomingCard({ appt, onReschedule, onCancel, variant, on
   const [fading, setFading] = useState(false)
   const [paying, setPaying] = useState(false)
   const [payError, setPayError] = useState(null)
-
-  const isPendingPayment = appt.effectiveStatus || appt.status === APPOINTMENT_STATUS.PENDING_PAYMENT
 
   // AI Triage fields
   const isAiReferred = appt.ai_referred || appt.triage_session_id
@@ -77,6 +75,9 @@ export default function UpcomingCard({ appt, onReschedule, onCancel, variant, on
   const location = appt.clinic_name ?? appt.location ?? ''
   const cancelHelpText = Reflect.get(appt, 'cancelText') ?? 'This action cannot be undone.'
   const displayStatus = appt.effectiveStatus || appt.status
+  const paymentStatus = String(appt.payment_status ?? appt.paymentStatus ?? '').toLowerCase()
+  const isPaid = paymentStatus === PAYMENT_STATUS.PAID
+  const isPendingPayment = displayStatus === APPOINTMENT_STATUS.PENDING_PAYMENT && !isPaid
   const statusLabel = APPT_STATUS_LABEL[displayStatus] ?? displayStatus
   const statusColorObj = APPT_STATUS_COLOR[displayStatus] ?? null
   const statusBadgeStyle = statusColorObj ? { backgroundColor: statusColorObj.bg, color: statusColorObj.text } : {}
@@ -260,6 +261,8 @@ UpcomingCard.propTypes = {
     ai_referred: PropTypes.bool,
     triage_session_id: PropTypes.string,
     urgency_level: PropTypes.string,
+    payment_status: PropTypes.string,
+    paymentStatus: PropTypes.string,
   }).isRequired,
   onReschedule: PropTypes.func.isRequired,
   onCancel: PropTypes.func.isRequired,

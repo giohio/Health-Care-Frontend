@@ -4,15 +4,89 @@ import { AlertTriangleIcon } from './EmrIcons'
 import { summarizeEmr, streamSSE } from '../../../api/ai'
 import AiMessageContent from '../../../components/shared/AiMessageContent'
 
-export default function PatientContextSidebar({ patient, vitals, activeMedications, severeAllergies, sidebarCollapsed, onToggleCollapse }) {
+const EMPTY_VITALS_FORM = {
+  blood_pressure: '',
+  temperature: '',
+  heart_rate: '',
+  spo2: '',
+  height_cm: '',
+  weight_kg: '',
+}
+
+function formatRecordedAt(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formFromVitals(vitals) {
+  return {
+    blood_pressure: vitals?.blood_pressure ?? '',
+    temperature: vitals?.temperature ?? '',
+    heart_rate: vitals?.heart_rate ?? '',
+    spo2: vitals?.spo2 ?? '',
+    height_cm: vitals?.height_cm ?? '',
+    weight_kg: vitals?.weight_kg ?? '',
+  }
+}
+
+export default function PatientContextSidebar({
+  patient,
+  vitals,
+  vitalsLoading,
+  vitalsSaving,
+  vitalsError,
+  onSaveVitals,
+  onSaveSummary,
+  initialSummaryContent,
+  activeMedications,
+  severeAllergies,
+  sidebarCollapsed,
+  onToggleCollapse,
+}) {
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [summaryLines, setSummaryLines] = useState([])
   const [summaryDone, setSummaryDone] = useState(false)
   const [summaryMessage, setSummaryMessage] = useState('')
   const [summaryLanguage, setSummaryLanguage] = useState('vi')
+  const [summarySaveStatus, setSummarySaveStatus] = useState('')
+  const [editingVitals, setEditingVitals] = useState(false)
+  const [vitalsForm, setVitalsForm] = useState(EMPTY_VITALS_FORM)
   const abortRef = useRef(null)
 
   const patientId = patient?.patient_id || patient?.id
+  const recordedAt = formatRecordedAt(vitals?.recorded_at)
+  const initialSummaryLines = String(initialSummaryContent || '').trim()
+    ? String(initialSummaryContent).split('\n')
+    : []
+  const displayedSummaryLines = summaryLines.length > 0 ? summaryLines : initialSummaryLines
+  const hasSummary = summaryLoading || displayedSummaryLines.length > 0
+  const isSummaryDone = summaryDone || (!summaryLoading && initialSummaryLines.length > 0)
+
+  const patchVitalsForm = (key, value) => {
+    setVitalsForm((current) => ({ ...current, [key]: value }))
+  }
+
+  const handleToggleVitalsForm = () => {
+    if (editingVitals) {
+      setEditingVitals(false)
+      return
+    }
+
+    setVitalsForm(formFromVitals(vitals))
+    setEditingVitals(true)
+  }
+
+  const handleVitalsSubmit = async (event) => {
+    event.preventDefault()
+    try {
+      const saved = await onSaveVitals?.(vitalsForm)
+      if (saved) setEditingVitals(false)
+    } catch {
+      // Parent owns the visible error state.
+    }
+  }
 
   const handleSummarize = () => {
     if (!patientId) return
@@ -20,10 +94,25 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
     setSummaryDone(false)
     setSummaryLines([])
     setSummaryMessage('')
+    setSummarySaveStatus('')
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
     let accumulated = ''
+    let saved = false
+    const persistSummary = async () => {
+      const content = accumulated.trim()
+      if (saved || !content) return
+      saved = true
+      setSummarySaveStatus('Saving summary...')
+      try {
+        await onSaveSummary?.(content)
+        setSummarySaveStatus('Summary saved')
+      } catch (err) {
+        saved = false
+        setSummarySaveStatus(err?.message || 'Could not save summary')
+      }
+    }
     summarizeEmr({ patientId, language: summaryLanguage }, controller.signal)
       .then((response) => {
         streamSSE(response, {
@@ -31,7 +120,11 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
             accumulated += chunk
             setSummaryLines(accumulated.split('\n'))
           },
-          onDone: () => { setSummaryLoading(false); setSummaryDone(true) },
+          onDone: () => {
+            setSummaryLoading(false)
+            setSummaryDone(true)
+            persistSummary()
+          },
           onError: () => {
             if (controller.signal.aborted) return
             setSummaryLoading(false)
@@ -49,7 +142,7 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
   }
 
   const handleCopySummary = async () => {
-    const text = summaryLines.join('\n')
+    const text = displayedSummaryLines.join('\n')
     if (!text) return
     try {
       await globalThis.navigator.clipboard.writeText(text)
@@ -98,7 +191,20 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
 
           {/* Vitals Quick View */}
           <div className="space-y-2.5">
-            <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-[#505060]">Current Vitals</p>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 dark:text-[#505060]">Current Vitals</p>
+                {recordedAt && <p className="mt-0.5 truncate text-[9px] font-medium text-slate-400 dark:text-[#606070]">{recordedAt}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={handleToggleVitalsForm}
+                disabled={!patientId || vitalsSaving}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#252530] dark:bg-[#16161e] dark:text-[#9898b0] dark:hover:bg-[#1c1c25] dark:hover:text-indigo-400"
+              >
+                {editingVitals ? 'Cancel' : 'Record'}
+              </button>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'BP', val: vitals?.blood_pressure ?? '–', unit: 'mmHg', color: 'text-rose-500' },
@@ -108,10 +214,99 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
               ].map((v) => (
                 <div key={v.label} className="rounded-xl border border-slate-200/60 bg-white/60 p-2.5 dark:border-[#252530]/60 dark:bg-[#111118]/60">
                   <p className="text-[10px] font-bold text-slate-400 dark:text-[#606070]">{v.label}</p>
-                  <p className={`text-sm font-black dark:text-[#eeeef5] ${v.color}`}>{v.val}<span className="ml-0.5 text-[9px] font-medium text-slate-400 dark:text-[#505060]">{v.unit}</span></p>
+                  <p className={`text-sm font-black dark:text-[#eeeef5] ${v.color}`}>{v.val}<span className="ml-0.5 text-[9px] font-medium text-slate-400 dark:text-[#505060]">{v.val === '–' ? '' : v.unit}</span></p>
                 </div>
               ))}
             </div>
+            {vitalsLoading && <p className="text-[10px] font-medium text-slate-400 dark:text-[#606070]">Loading vitals...</p>}
+            {editingVitals && (
+              <form onSubmit={handleVitalsSubmit} className="rounded-xl border border-slate-200/70 bg-white/60 p-3 dark:border-[#252530]/70 dark:bg-[#111118]/60">
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    BP
+                    <input
+                      value={vitalsForm.blood_pressure}
+                      onChange={(event) => patchVitalsForm('blood_pressure', event.target.value)}
+                      placeholder="120/80"
+                      pattern="\d{2,3}\s*/\s*\d{2,3}"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    Temp
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="30"
+                      max="45"
+                      value={vitalsForm.temperature}
+                      onChange={(event) => patchVitalsForm('temperature', event.target.value)}
+                      placeholder="37.0"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    HR
+                    <input
+                      type="number"
+                      min="20"
+                      max="250"
+                      value={vitalsForm.heart_rate}
+                      onChange={(event) => patchVitalsForm('heart_rate', event.target.value)}
+                      placeholder="72"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    SpO2
+                    <input
+                      type="number"
+                      min="50"
+                      max="100"
+                      value={vitalsForm.spo2}
+                      onChange={(event) => patchVitalsForm('spo2', event.target.value)}
+                      placeholder="%"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    Height
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="30"
+                      max="260"
+                      value={vitalsForm.height_cm}
+                      onChange={(event) => patchVitalsForm('height_cm', event.target.value)}
+                      placeholder="cm"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[10px] font-bold text-slate-500 dark:text-[#9898b0]">
+                    Weight
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="1"
+                      max="400"
+                      value={vitalsForm.weight_kg}
+                      onChange={(event) => patchVitalsForm('weight_kg', event.target.value)}
+                      placeholder="kg"
+                      className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 dark:border-[#252530] dark:bg-[#0e0e15] dark:text-[#eeeef5]"
+                    />
+                  </label>
+                </div>
+                {vitalsError && <p className="mt-2 text-[10px] font-semibold text-rose-600 dark:text-rose-400">{vitalsError}</p>}
+                <button
+                  type="submit"
+                  disabled={vitalsSaving}
+                  className="mt-3 inline-flex w-full items-center justify-center rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm transition-all hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {vitalsSaving ? 'Saving...' : 'Save Vitals'}
+                </button>
+              </form>
+            )}
+            {!editingVitals && vitalsError && <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400">{vitalsError}</p>}
           </div>
 
           {/* High Alert Allergies */}
@@ -173,7 +368,7 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
               </div>
             </div>
 
-            {!(summaryLoading || summaryLines.length > 0) ? (
+            {!hasSummary ? (
               <div className="flex flex-col items-center justify-center py-3 text-center">
                 <p className="mb-3 text-xs text-slate-500 dark:text-[#70708a]">Generate a quick overview of patient history, recent labs, and notes.</p>
                 <button
@@ -189,7 +384,7 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
             ) : (
               <div className="flex flex-col gap-3">
                 <div className="relative rounded-xl border border-indigo-100 bg-white/60 p-3 text-xs shadow-inner dark:border-[#2a2a3e] dark:bg-[#111118]/80">
-                  {summaryLoading && summaryLines.length === 0 && (
+                  {summaryLoading && displayedSummaryLines.length === 0 && (
                     <div className="flex flex-col items-center justify-center py-4 opacity-70">
                       <svg className="mb-2 h-5 w-5 animate-spin text-indigo-600 dark:text-indigo-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -198,9 +393,9 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
                       <span className="text-[10px] font-semibold text-slate-500 dark:text-[#70708a] animate-pulse">Analyzing EMR records...</span>
                     </div>
                   )}
-                  {summaryLines.length > 0 && (
+                  {displayedSummaryLines.length > 0 && (
                     <div className="relative z-10 max-h-[300px] overflow-y-auto scrollbar-hide text-slate-700 dark:text-[#c8c8e0]">
-                       <AiMessageContent text={summaryLines.join('\n')} />
+                       <AiMessageContent text={displayedSummaryLines.join('\n')} />
                        {summaryLoading && (
                          <div className="mt-2 flex items-center gap-1.5 opacity-50">
                            <div className="h-1.5 w-1.5 animate-bounce rounded-full bg-indigo-500"></div>
@@ -214,7 +409,7 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
 
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    {summaryDone && (
+                    {isSummaryDone && (
                       <button
                         type="button"
                         onClick={handleCopySummary}
@@ -227,13 +422,14 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
                       </button>
                     )}
                     {summaryMessage && <span className="animate-in fade-in slide-in-from-left-2 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">{summaryMessage}</span>}
+                    {summarySaveStatus && <span className="animate-in fade-in slide-in-from-left-2 text-[10px] font-medium text-slate-500 dark:text-[#9898b0]">{summarySaveStatus}</span>}
                   </div>
                   <button
                      type="button"
                      onClick={handleSummarize}
                      disabled={summaryLoading}
                      className={`rounded-full p-1.5 transition-colors ${summaryLoading ? 'text-slate-400 dark:text-[#505060]' : 'text-slate-400 hover:bg-indigo-50 hover:text-indigo-600 dark:text-[#70708a] dark:hover:bg-indigo-500/20 dark:hover:text-indigo-300'}`}
-                     title={summaryDone ? "Regenerate Summary" : "Stop Generation"}
+                     title={isSummaryDone ? "Regenerate Summary" : "Stop Generation"}
                   >
                      {summaryLoading ? (
                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
@@ -264,6 +460,12 @@ export default function PatientContextSidebar({ patient, vitals, activeMedicatio
 PatientContextSidebar.propTypes = {
   patient: PropTypes.object.isRequired,
   vitals: PropTypes.object,
+  vitalsLoading: PropTypes.bool,
+  vitalsSaving: PropTypes.bool,
+  vitalsError: PropTypes.string,
+  onSaveVitals: PropTypes.func,
+  onSaveSummary: PropTypes.func,
+  initialSummaryContent: PropTypes.string,
   activeMedications: PropTypes.array,
   severeAllergies: PropTypes.array,
   sidebarCollapsed: PropTypes.bool,

@@ -220,6 +220,9 @@ export default function App() {
   }, [])
 
   const navigatePatient = (view, data) => {
+    if (paymentReturn && view !== 'payment-return') {
+      setPaymentReturn(null)
+    }
     if (view === patientView && !data) return
     setIsTransitioning(true)
     globalThis.setTimeout(() => {

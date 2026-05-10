@@ -82,7 +82,7 @@ const STATUS_LABEL = {
   auto_confirmed:    'Auto Confirmed',
   pending_review:    'Pending Review',
   doctor_confirmed:  'Confirmed',
-  referred_internal: 'Referred',
+  referred_internal: 'Referred to General Medicine',
   abandoned:         'Abandoned',
 }
 
@@ -115,6 +115,15 @@ function relTime(iso) {
   if (h < 24)  return `${h}h ago`
   const d = Math.floor(h / 24)
   return `${d}d ago`
+}
+
+function isGeneralMedicineDepartment(department) {
+  const normalized = String(department || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+  return ['general medicine', 'internal medicine', 'general internal medicine', 'noi tong quat', 'nội tổng quát'].includes(normalized)
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +161,7 @@ async function enrichAndSet(raw, setSessions) {
 function SessionDetailPanel({ session, onConfirm, onRefer, onClose, loading }) {
   const [notes, setNotes] = useState('')
   const isPending = session.status === 'pending_review'
+  const isGeneralMedicineSuggestion = isGeneralMedicineDepartment(session.suggested_department)
 
   return (
     <div className="flex flex-col h-full">
@@ -266,20 +276,27 @@ function SessionDetailPanel({ session, onConfirm, onRefer, onClose, loading }) {
             <button
               type="button"
               disabled={loading}
-              className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-60"
+              className={`${isGeneralMedicineSuggestion ? 'w-full' : 'flex-1'} rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-60`}
               onClick={() => onConfirm(session.id, notes)}
             >
               {loading ? 'Saving…' : session.pending_booking ? 'Confirm & Create Appointment' : 'Confirm AI Suggestion'}
             </button>
-            <button
-              type="button"
-              disabled={loading}
-              className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50"
-              onClick={() => onRefer(session.id, notes)}
-            >
-              {loading ? 'Saving…' : 'Refer to Internal Med.'}
-            </button>
+            {!isGeneralMedicineSuggestion && (
+              <button
+                type="button"
+                disabled={loading}
+                className="flex-1 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50"
+                onClick={() => onRefer(session.id, notes)}
+              >
+                {loading ? 'Saving…' : 'Refer to General Medicine'}
+              </button>
+            )}
           </div>
+          {isGeneralMedicineSuggestion && (
+            <p className="text-xs text-slate-400 dark:text-[#606070]">
+              This AI suggestion is already assigned to General Medicine.
+            </p>
+          )}
         </div>
       )}
     </div>

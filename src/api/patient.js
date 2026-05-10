@@ -43,7 +43,7 @@ export const patientApi = {
   getPatient: (patientId) => apiFetch(`/patients/${patientId}`),
 
   // Vitals endpoints
-  postVitals: (patientId, q) =>
+  postVitals: (patientId, q = {}) =>
     apiFetch(`/patients/${patientId}/vitals?${new URLSearchParams(q)}`, {
       method: 'POST',
     }),

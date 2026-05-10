@@ -198,11 +198,21 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
       if (Array.isArray(data)) list = data
       else if (Array.isArray(data?.items)) list = data.items
       else if (Array.isArray(data?.appointments)) list = data.appointments
-      setAppointments(list.map((a) => ({
-        ...a,
-        status: a.status?.toLowerCase() ?? a.status,
-        effectiveStatus: isOverdue(a) ? APPOINTMENT_STATUS.OVERDUE : (a.status?.toLowerCase() ?? a.status),
-      })))
+      setAppointments(list.map((a) => {
+        const status = a.status?.toLowerCase() ?? a.status
+        const paymentStatus = a.payment_status?.toLowerCase() ?? a.paymentStatus?.toLowerCase() ?? a.payment_status ?? a.paymentStatus
+        const effectiveStatus = isOverdue({ ...a, status })
+          ? APPOINTMENT_STATUS.OVERDUE
+          : (status === APPOINTMENT_STATUS.PENDING_PAYMENT && paymentStatus === 'paid'
+              ? APPOINTMENT_STATUS.PENDING
+              : status)
+        return {
+          ...a,
+          status,
+          payment_status: paymentStatus,
+          effectiveStatus,
+        }
+      }))
     } catch (err) {
       setError(err.message || 'Failed to load appointments')
     } finally {
@@ -218,9 +228,21 @@ export default function AppointmentsView({ setCurrentView, setSelectedAppointmen
     const latest = wsNotifications[0]
     if (!latest?.id || latest.id === lastWsNotifId.current) return
     lastWsNotifId.current = latest.id
-    if (latest?.event_type === NOTIFICATION_EVENT.APPT_CREATED_PATIENT) {
+    const eventType = latest?.event_type
+    if (
+      eventType === NOTIFICATION_EVENT.APPT_CREATED_PATIENT
+      || eventType === NOTIFICATION_EVENT.APPT_CONFIRMED
+      || eventType === NOTIFICATION_EVENT.PAYMENT_PAID
+      || eventType === NOTIFICATION_EVENT.PAYMENT_SUCCESS
+    ) {
       load()
-      setToast('Booking successful! Your appointment is ready.')
+      const retry = globalThis.setTimeout(() => load(), 1500)
+      if (eventType === NOTIFICATION_EVENT.PAYMENT_PAID || eventType === NOTIFICATION_EVENT.PAYMENT_SUCCESS) {
+        setToast('Payment successful. Your appointment status is updating.')
+      } else {
+        setToast('Booking successful! Your appointment is ready.')
+      }
+      return () => globalThis.clearTimeout(retry)
     } else if (latest?.event_type === NOTIFICATION_EVENT.APPT_DECLINED) {
       load()
       setToast(latest.body || 'Your appointment was declined by the doctor.')

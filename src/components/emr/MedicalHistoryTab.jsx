@@ -61,7 +61,7 @@ EmptyState.propTypes = {
   message: PropTypes.string.isRequired,
 }
 
-export default function MedicalHistoryTab({ patientId }) {
+export default function MedicalHistoryTab({ patientId, refreshKey }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [diagnoses, setDiagnoses] = useState([])
@@ -104,7 +104,7 @@ export default function MedicalHistoryTab({ patientId }) {
     return () => {
       cancelled = true
     }
-  }, [patientId])
+  }, [patientId, refreshKey])
 
   const sortedNotes = useMemo(
     () => [...notes].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
@@ -267,4 +267,5 @@ export default function MedicalHistoryTab({ patientId }) {
 
 MedicalHistoryTab.propTypes = {
   patientId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  refreshKey: PropTypes.number,
 }

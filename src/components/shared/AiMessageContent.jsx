@@ -38,6 +38,91 @@ const components = {
   ),
 }
 
+const optionRe = /\((\d+)\)\s+(.+?)\s+[\u2013\u2014-]\s+(\d{1,2}:\d{2})(?:\s*(?:\u2190|<-)\s*([a-z\s]+))?/gi
+
+function parseBookingOptions(text) {
+  const options = []
+  let firstIndex = -1
+  let lastEnd = -1
+  let match
+
+  optionRe.lastIndex = 0
+  while ((match = optionRe.exec(text)) !== null) {
+    if (firstIndex < 0) firstIndex = match.index
+    lastEnd = optionRe.lastIndex
+    options.push({
+      number: match[1],
+      doctor: match[2].trim(),
+      time: match[3],
+      note: (match[4] || '').trim(),
+    })
+  }
+
+  if (options.length < 2) return null
+
+  return {
+    intro: text.slice(0, firstIndex).trim(),
+    options,
+    outro: text.slice(lastEnd).trim(),
+  }
+}
+
+function BookingOptionsMessage({ parsed }) {
+  return (
+    <div className="space-y-3">
+      {parsed.intro && (
+        <Markdown remarkPlugins={[remarkGfm]} components={components}>
+          {parsed.intro}
+        </Markdown>
+      )}
+
+      <div className="grid gap-2" aria-label="Available appointment options">
+        {parsed.options.map((option) => {
+          const isRecommended = /recommended|closest/i.test(option.note)
+          return (
+            <div
+              key={`${option.number}-${option.doctor}-${option.time}`}
+              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-[#2b2b38] dark:bg-[#111118]"
+            >
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-bold text-indigo-700 dark:bg-indigo-950/70 dark:text-indigo-300">
+                {option.number}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-slate-800 dark:text-[#eeeef5]">{option.doctor}</p>
+                <p className="text-xs font-medium text-slate-500 dark:text-[#9898b0]">{option.time}</p>
+              </div>
+              {isRecommended && (
+                <span className="shrink-0 rounded-md bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+                  Recommended
+                </span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {parsed.outro && (
+        <Markdown remarkPlugins={[remarkGfm]} components={components}>
+          {parsed.outro}
+        </Markdown>
+      )}
+    </div>
+  )
+}
+
+BookingOptionsMessage.propTypes = {
+  parsed: PropTypes.shape({
+    intro: PropTypes.string,
+    options: PropTypes.arrayOf(PropTypes.shape({
+      number: PropTypes.string.isRequired,
+      doctor: PropTypes.string.isRequired,
+      time: PropTypes.string.isRequired,
+      note: PropTypes.string,
+    })).isRequired,
+    outro: PropTypes.string,
+  }).isRequired,
+}
+
 export default function AiMessageContent({ text }) {
   if (!text) return null
   // Defensively strip [Q]/[R] prefix if backend didn't strip it
@@ -57,6 +142,16 @@ export default function AiMessageContent({ text }) {
     )
     .replace(/\s+\*\*(\d+\.\s+[^*]+)\*\*/g, '\n\n### $1\n')
     .replace(/\s+\*\s+(?=\*\*|[A-Z])/g, '\n- ')
+
+  const bookingOptions = parseBookingOptions(sanitized)
+  if (bookingOptions) {
+    return (
+      <div className="ai-prose">
+        <BookingOptionsMessage parsed={bookingOptions} />
+      </div>
+    )
+  }
+
   return (
     <div className="ai-prose">
       <Markdown remarkPlugins={[remarkGfm]} components={components}>

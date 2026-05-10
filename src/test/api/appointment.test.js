@@ -20,6 +20,7 @@ vi.mock('../../api/patient.js', () => ({
 
 // Import AFTER mock declaration (Vitest hoists vi.mock automatically)
 const { appointmentApi } = await import('../../api/appointment.js')
+const { patientApi } = await import('../../api/patient.js')
 
 function mockFetch(body, status = 200) {
   return vi.spyOn(globalThis, 'fetch').mockResolvedValue(makeFetchResponse(body, status))
@@ -113,5 +114,25 @@ describe('appointmentApi.getByDoctor', () => {
     const result = await appointmentApi.getByDoctor('doc-1', {})
 
     expect(result[0].status).toBe('pending')
+  })
+
+  it('enriches missing patient_name from patient summary response shapes', async () => {
+    mockFetch([{ id: 'a-3', status: 'PENDING', patient_id: 'p-3' }])
+    patientApi.getPatientSummary.mockResolvedValue({
+      profile: {
+        full_name: 'Nguyen Huu Kien',
+        gender: 'male',
+      },
+      health: {
+        blood_type: 'O+',
+      },
+    })
+
+    const result = await appointmentApi.getByDoctor('doc-1', {})
+
+    expect(patientApi.getPatientSummary).toHaveBeenCalledWith('p-3')
+    expect(result[0].patient_name).toBe('Nguyen Huu Kien')
+    expect(result[0].patient_gender).toBe('male')
+    expect(result[0].blood_type).toBe('O+')
   })
 })

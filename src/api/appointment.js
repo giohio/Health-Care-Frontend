@@ -46,6 +46,33 @@ async function enrichWithDoctorInfo(appts) {
   }))
 }
 
+function unwrapPatientPayload(value) {
+  if (!value || typeof value !== 'object') return null
+  return value.data && typeof value.data === 'object' ? value.data : value
+}
+
+function pickPatientInfo(value) {
+  const root = unwrapPatientPayload(value)
+  if (!root) return null
+  const profile = root.profile || root.patient || root.user || {}
+  const health = root.health || root.health_background || {}
+  const name = (
+    root.full_name || root.fullName || root.name || root.display_name ||
+    profile.full_name || profile.fullName || profile.name || profile.display_name ||
+    null
+  )
+
+  return {
+    name,
+    dob: root.date_of_birth || root.dob || profile.date_of_birth || profile.dob || null,
+    gender: root.gender || profile.gender || null,
+    blood_type: root.blood_type || health.blood_type || null,
+    allergies: root.allergies || health.allergies || null,
+    chronic_conditions: root.chronic_conditions || health.chronic_conditions || null,
+    vitals_latest: root.vitals_latest || root.vital_signs || root.latest_vitals || profile.vitals_latest || profile.vital_signs || null,
+  }
+}
+
 async function enrichWithPatientInfo(appts) {
   if (!Array.isArray(appts)) return appts
   const needLookup = appts.filter((a) => !a.patient_name && a.patient_id)
@@ -61,15 +88,8 @@ async function enrichWithPatientInfo(appts) {
     results.forEach((r, i) => {
       if (r.status === 'fulfilled' && r.value) {
         const pid = needLookup[i].patient_id
-        nameMap[pid] = {
-          name: r.value.full_name || r.value.name || null,
-          dob: r.value.date_of_birth || r.value.dob || null,
-          gender: r.value.gender || null,
-          blood_type: r.value.blood_type || null,
-          allergies: r.value.allergies || null,
-          chronic_conditions: r.value.chronic_conditions || null,
-          vitals_latest: r.value.vitals_latest || null,
-        }
+        const info = pickPatientInfo(r.value)
+        if (info) nameMap[pid] = info
       }
     })
   } catch { /* continue to fallback */ }
@@ -87,14 +107,8 @@ async function enrichWithPatientInfo(appts) {
       fallbackResults.forEach((r, i) => {
         if (r.status === 'fulfilled' && r.value) {
           const pid = missingPids[i]
-          nameMap[pid] = {
-            name: r.value.full_name || r.value.name || null,
-            dob: r.value.date_of_birth || r.value.dob || null,
-            gender: r.value.gender || null,
-            blood_type: r.value.blood_type || null,
-            allergies: r.value.allergies || null,
-            chronic_conditions: r.value.chronic_conditions || null,
-          }
+          const info = pickPatientInfo(r.value)
+          if (info) nameMap[pid] = info
         }
       })
     } catch { /* leave missing */ }

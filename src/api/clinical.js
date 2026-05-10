@@ -40,8 +40,11 @@ export const clinicalApi = {
       body: JSON.stringify(data),
     }),
 
-  getNotes: (patientId) => 
-    apiFetch(`/clinical/patients/${patientId}/notes`),
+  getNotes: (patientId, params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    const path = `/clinical/patients/${patientId}/notes`;
+    return apiFetch(query ? `${path}?${query}` : path);
+  },
 
   createNote: (patientId, data) => 
     apiFetch(`/clinical/patients/${patientId}/notes`, {

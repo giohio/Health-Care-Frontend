@@ -131,7 +131,7 @@ export function confirmTriageSession(sessionId, notes) {
   })
 }
 
-/** POST /ai/triage-sessions/{id}/refer-internal — doctor refers to internal medicine */
+/** POST /ai/triage-sessions/{id}/refer-internal — doctor redirects to General Medicine */
 export function referInternalTriageSession(sessionId, notes) {
   return apiFetch(`/ai/triage-sessions/${sessionId}/refer-internal`, {
     method: 'POST',

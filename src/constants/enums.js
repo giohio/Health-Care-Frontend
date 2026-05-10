@@ -50,6 +50,7 @@ export const NOTIFICATION_EVENT = {
   APPT_RESCHEDULED:    'appointment.rescheduled',
   APPT_REMINDER:       'appointment.reminder',
   PAYMENT_CREATED:     'payment.created',
+  PAYMENT_PAID:        'payment.paid',
   PAYMENT_SUCCESS:     'payment.success',
   PAYMENT_FAILED:      'payment.failed',
 }

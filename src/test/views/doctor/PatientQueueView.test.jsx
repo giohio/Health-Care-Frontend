@@ -306,11 +306,17 @@ describe('AI Summary', () => {
 
   it('calls getTriageSessionSummary and opens summary modal', async () => {
     const user = userEvent.setup()
-    getTriageSessionSummary.mockResolvedValue({ summary: 'Patient complains of chest pain.' })
 
     renderView([
       makePendingAppt({ ai_referred: true, triage_session_id: 'sess-001' }),
     ])
+    getTriageSessionSummary.mockResolvedValue({
+      chief_complaint: 'Fever and cough',
+      clinical_reasoning: 'Fever with cough for a week suggests an acute respiratory infection.',
+      department_reasoning: 'General Medicine can assess systemic symptoms and lung findings.',
+      recommended_department: 'General Medicine',
+      urgency_level: 'Priority',
+    })
 
     const summaryBtn = await screen.findByRole('button', { name: /ai summary/i })
     await user.click(summaryBtn)
@@ -318,6 +324,8 @@ describe('AI Summary', () => {
     await waitFor(() => {
       expect(getTriageSessionSummary).toHaveBeenCalledWith('sess-001')
     })
+    expect(await screen.findByText(/why ai suggested this/i)).toBeInTheDocument()
+    expect(screen.getByText(/acute respiratory infection/i)).toBeInTheDocument()
   })
 })
 

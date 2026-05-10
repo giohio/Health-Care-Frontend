@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import PropTypes from 'prop-types'
 
 function CheckCircleIcon() {
@@ -65,24 +64,12 @@ const RESULT_MAP = {
   },
 }
 
-export default function PaymentReturnView({ status, txnRef, onViewAppointments, onRetry }) {
+export default function PaymentReturnView({ status, onViewAppointments, onRetry }) {
   const result = RESULT_MAP[status] ?? RESULT_MAP.pending
   const Icon = result.icon
-  const [copied, setCopied] = useState(false)
   let statusBadgeLabel = 'Processing'
   if (status === 'success') statusBadgeLabel = 'Payment Completed'
   if (status === 'failed') statusBadgeLabel = 'Payment Failed'
-
-  async function handleCopyTxn() {
-    if (!txnRef || !globalThis.navigator?.clipboard) return
-    try {
-      await globalThis.navigator.clipboard.writeText(txnRef)
-      setCopied(true)
-      globalThis.setTimeout(() => setCopied(false), 1400)
-    } catch {
-      setCopied(false)
-    }
-  }
 
   return (
     <div className="mx-auto max-w-xl px-2 sm:px-0">
@@ -101,22 +88,6 @@ export default function PaymentReturnView({ status, txnRef, onViewAppointments, 
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-[#eeeef5]">{result.title}</h1>
             <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-600 dark:text-[#a4a4bb]">{result.message}</p>
           </div>
-
-          {txnRef && (
-            <div className="w-full rounded-2xl border border-white/60 bg-white/70 p-4 text-left shadow-sm backdrop-blur dark:border-white/10 dark:bg-black/20">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-[#80809a]">Transaction Reference</p>
-              <div className="mt-2 flex items-center gap-2 rounded-xl border border-slate-200/80 bg-slate-50/80 px-3 py-2 dark:border-[#313145] dark:bg-[#141420]/70">
-                <p className="min-w-0 flex-1 break-all font-mono text-[13px] font-semibold text-slate-900 dark:text-[#eeeef5]">{txnRef}</p>
-                <button
-                  type="button"
-                  onClick={handleCopyTxn}
-                  className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 dark:border-[#3a3a4f] dark:bg-[#1e1e2b] dark:text-[#c8c8e0] dark:hover:bg-[#2a2a3b]"
-                >
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-          )}
 
           <div className="mt-1 flex w-full flex-col gap-2">
             <button
@@ -145,12 +116,10 @@ export default function PaymentReturnView({ status, txnRef, onViewAppointments, 
 
 PaymentReturnView.propTypes = {
   status: PropTypes.oneOf(['success', 'failed', 'pending']),
-  txnRef: PropTypes.string,
   onViewAppointments: PropTypes.func.isRequired,
   onRetry: PropTypes.func.isRequired,
 }
 
 PaymentReturnView.defaultProps = {
   status: 'pending',
-  txnRef: null,
 }

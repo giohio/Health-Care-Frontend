@@ -11,10 +11,8 @@ import {
 } from '../../icons'
 
 const DEPARTMENTS = [
-  'Cardiology', 'Neurology', 'Internal Medicine', 'Orthopedics',
-  'Dermatology', 'Pulmonology', 'Nephrology', 'Gastroenterology',
-  'Ophthalmology', 'Psychiatry', 'Endocrinology', 'Radiology',
-  'Emergency', 'General Practice',
+  'General Medicine', 'Cardiology', 'Neurology', 'Pediatrics',
+  'General Surgery', 'Dermatology', 'ENT', 'Ophthalmology',
 ]
 
 const FILTERS = [
@@ -68,6 +66,13 @@ function formatApptTime(iso) {
   try {
     return new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   } catch { return null }
+}
+
+function getPatientDisplayName(patient) {
+  const name = patient.patient_name ?? patient.full_name ?? patient.name ?? patient.patient?.full_name ?? patient.profile?.full_name
+  if (name) return name
+  const id = patient.patient_id || patient.id
+  return id ? `Patient ${String(id).slice(0, 8)}` : 'Patient'
 }
 
 function LabReadinessBadge({ lr }) {
@@ -246,10 +251,6 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
     const overdue = appointments.filter((a) => a.status === APPOINTMENT_STATUS.OVERDUE).length
     return { total: appointments.length, waiting, inRoom, completed, overdue }
   }, [appointments])
-
-  const pendingAppointments = useMemo(() =>
-    appointments.filter((a) => a.status === APPOINTMENT_STATUS.PENDING || a.status === APPOINTMENT_STATUS.WAITING),
-  [appointments])
 
   async function handleConfirm(id) {
     if (actionLoading) return
@@ -447,6 +448,7 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
           />
           <button
             type="button"
+            aria-label="Show all-time appointments"
             className={`flex h-10 items-center justify-center gap-2 rounded-xl border border-transparent px-4 text-sm font-semibold transition-all duration-300 ${isAllTime ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 dark:bg-indigo-500' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900 dark:bg-[#1c1c25] dark:text-[#c8c8e0] dark:hover:bg-[#252530]'}`}
             onClick={() => setIsAllTime(true)}
           >
@@ -499,94 +501,6 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
         </div>
       </div>
 
-      {/* Pending Booking Requests */}
-      {pendingAppointments.some(a => a.status === APPOINTMENT_STATUS.PENDING) && (
-        <div className="mb-5 space-y-3">
-          {appointments
-            .filter((a) => a.status === APPOINTMENT_STATUS.PENDING)
-            .map((booking) => (
-              <article key={booking.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-all dark:bg-[#111118] ${
-                booking.ai_referred
-                  ? 'border-indigo-300 dark:border-indigo-900/60'
-                  : 'border-amber-200 dark:border-amber-900/50'
-              }`}>
-                <div className={`mb-3 flex items-center justify-between rounded-xl px-3 py-2 text-xs font-semibold ${
-                  booking.ai_referred
-                    ? 'border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-gradient-to-r dark:from-indigo-950/40 dark:to-violet-950/40 dark:text-indigo-300'
-                    : 'border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300'
-                }`}>
-                  {booking.ai_referred ? (
-                    <span className="flex items-center gap-2">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.4L12 17l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/><path d="M18.5 3.5l.8 2.1 2.2.8-2.2.8-.8 2.1-.8-2.1-2.2-.8 2.2-.8.8-2.1z"/></svg>
-                      AI Recommended · Needs your review
-                      {booking.urgency_level && booking.urgency_level !== 'low' && (
-                        <span className={`ml-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          booking.urgency_level === 'urgent'
-                            ? 'bg-rose-200 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
-                            : 'bg-amber-200 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                        }`}>
-                          <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${
-                            booking.urgency_level === 'urgent' ? 'bg-rose-500' : 'bg-amber-500'
-                          }`} />
-                          {booking.urgency_level === 'urgent' ? 'URGENT' : 'PRIORITY'}
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    <span className="flex items-center gap-2">
-                      <span className="inline-flex h-2 w-2 rounded-full bg-amber-500 animate-pulse" />{' '}
-                      New booking request · Awaiting confirmation
-                    </span>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">{booking.patient_name ?? booking.name}</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#70708a]">
-                      {booking.specialty_name} · {booking.appointment_date} · {booking.start_time}
-                      {booking.urgency_level && booking.urgency_level !== 'low' && ` · ${booking.urgency_level}`}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {actionLoading === booking.id ? (
-                      <span className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-400 dark:border-[#252530]">…</span>
-                    ) : (
-                      <>
-                        {(booking.triage_session_id || booking.ai_referred) && (
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 px-3 py-1.5 text-xs font-semibold text-indigo-600 transition-colors hover:bg-indigo-50 dark:border-indigo-800/60 dark:text-indigo-400 dark:hover:bg-indigo-950/30"
-                            onClick={() => handleLoadSummary(booking.triage_session_id)}
-                          >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.4L12 17l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/></svg>
-                            AI Summary
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-300 dark:hover:bg-rose-950/30"
-                          onClick={() => { setDeclineModal({ id: booking.id, patientName: booking.patient_name ?? booking.name }); setDeclineReason(''); setDeclineRedirect('') }}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                          Decline
-                        </button>
-                        <button
-                          type="button"
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
-                          onClick={() => setConfirmModal({ id: booking.id, patientName: booking.patient_name ?? booking.name, specialty: booking.specialty_name, date: booking.appointment_date, time: booking.start_time })}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                          Confirm
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </article>
-            ))}
-        </div>
-      )}
-
       {/* Loading Skeletons */}
       {loading && (
         <div className="flex flex-col gap-3">
@@ -598,7 +512,7 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
       {!loading && filteredPatients.length > 0 && (
         <div className="flex flex-col gap-3">
           {filteredPatients.map((patient, idx) => {
-            const name = patient.patient_name ?? patient.name ?? 'Patient'
+            const name = getPatientDisplayName(patient)
             let pStatus = 'waiting'
             if (patient.status === APPOINTMENT_STATUS.CONFIRMED) pStatus = 'confirmed'
             else if (patient.status === APPOINTMENT_STATUS.IN_PROGRESS) pStatus = 'in-room'
@@ -658,7 +572,17 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
                     {patient.ai_referred && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-indigo-100 to-violet-100 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-indigo-700 shadow-sm dark:from-indigo-950/60 dark:to-violet-950/60 dark:text-indigo-300">
                         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.4L12 17l-1.9-5.6L4.5 10l5.6-1.4L12 3z"/></svg>
-                        AI Triage
+                        AI Recommended · Review
+                      </span>
+                    )}
+                    {patient.ai_referred && patient.urgency_level && patient.urgency_level !== 'low' && (
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                        patient.urgency_level === 'urgent'
+                          ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300'
+                          : 'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300'
+                      }`}>
+                        <span className={`h-1.5 w-1.5 rounded-full animate-pulse ${patient.urgency_level === 'urgent' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                        {patient.urgency_level === 'urgent' ? 'Urgent' : 'Priority'}
                       </span>
                     )}
                     {(age || gender) && (
@@ -703,9 +627,36 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
                         <span className={`h-1.5 w-1.5 rounded-full ${getStatusDotClasses(pStatus)}`} aria-hidden="true" />
                         {getStatusLabel(pStatus)}
                       </span>
-                      <div className="md:hidden"><LabReadinessBadge lr={patient.lab_readiness} /></div>
+                      <LabReadinessBadge lr={patient.lab_readiness} />
                     </div>
-                    <div className="hidden md:block"><LabReadinessBadge lr={patient.lab_readiness} /></div>
+
+                    {pStatus === 'waiting' && (
+                      <div className="mt-1 flex w-full md:w-auto flex-wrap items-center gap-2">
+                        {patient.ai_referred && patient.triage_session_id && (
+                          <button
+                            type="button"
+                            className="flex-1 md:flex-none inline-flex justify-center rounded-xl border border-indigo-200/80 bg-white px-3 py-2 text-xs font-semibold text-indigo-600 shadow-[0_2px_8px_-4px_rgba(99,102,241,0.2)] transition-all hover:bg-indigo-50/50 dark:border-indigo-800/60 dark:bg-transparent dark:text-indigo-400 dark:hover:bg-indigo-950/30"
+                            onClick={() => handleLoadSummary(patient.triage_session_id)}
+                          >
+                            AI Summary
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="flex-1 md:flex-none inline-flex justify-center rounded-xl border border-rose-200/80 bg-white px-3 py-2 text-xs font-semibold text-rose-600 transition-all hover:bg-rose-50 dark:border-rose-900/60 dark:bg-transparent dark:text-rose-300 dark:hover:bg-rose-950/30"
+                          onClick={() => { setDeclineModal({ id: patient.id, patientName: name }); setDeclineReason(''); setDeclineRedirect('') }}
+                        >
+                          Decline
+                        </button>
+                        <button
+                          type="button"
+                          className="flex-1 md:flex-none inline-flex justify-center rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm shadow-indigo-600/20 transition-all duration-300 hover:bg-indigo-500 hover:shadow-md hover:shadow-indigo-500/30 active:scale-[0.98] dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                          onClick={() => setConfirmModal({ id: patient.id, patientName: name, specialty: patient.specialty_name, date: patient.appointment_date, time: patient.start_time })}
+                        >
+                          Confirm
+                        </button>
+                      </div>
+                    )}
 
                     {pStatus !== 'pending-payment' && pStatus !== 'waiting' && pStatus !== 'declined' && (
                       <div className="mt-1 flex w-full md:w-auto items-center gap-2">
@@ -1012,6 +963,8 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
               )}
               {summaryModal.data && (() => {
                 const s = summaryModal.data
+                const recommendationReasons = [s.clinical_reasoning, s.department_reasoning]
+                  .filter((reason) => typeof reason === 'string' && reason.trim())
                 return (
                   <div className="space-y-4">
                     {s.chief_complaint && (
@@ -1062,17 +1015,20 @@ export default function PatientQueueView({ navigateTo, setSelectedPatient, user,
                         </ul>
                       </div>
                     )}
-                    {s.clinical_reasoning && (
-                      <div>
-                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#505060]">Clinical Reasoning</p>
-                        <p className="text-sm text-slate-700 dark:text-[#c8c8e0]">{s.clinical_reasoning}</p>
-                      </div>
-                    )}
-                    {(s.recommended_department || s.urgency_level) && (
+                    {(s.recommended_department || s.urgency_level || recommendationReasons.length > 0) && (
                       <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 dark:border-indigo-800/60 dark:bg-indigo-950/30">
                         {s.recommended_department && <p className="text-sm font-semibold text-indigo-700 dark:text-indigo-300">→ {s.recommended_department}</p>}
                         {s.urgency_level && <p className="mt-0.5 text-xs text-indigo-500 dark:text-indigo-400">Urgency: {s.urgency_level}</p>}
-                        {s.department_reasoning && <p className="mt-1.5 text-xs text-indigo-600 dark:text-indigo-300">{s.department_reasoning}</p>}
+                        {recommendationReasons.length > 0 && (
+                          <div className="mt-3 border-t border-indigo-200/80 pt-2 dark:border-indigo-800/50">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-indigo-500 dark:text-indigo-400">Why AI Suggested This</p>
+                            <div className="space-y-1.5">
+                              {recommendationReasons.map((reason) => (
+                                <p key={reason} className="text-xs leading-relaxed text-indigo-700 dark:text-indigo-200">{reason}</p>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                     {s.triage_status && (
