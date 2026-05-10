@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { clinicalAssist, streamSSE } from '../../api/ai'
+import AiMessageContent from '../../components/shared/AiMessageContent'
 
 function ChevronLeftIcon() {
   return (
@@ -162,48 +163,54 @@ function ArrowUpIcon() {
   )
 }
 
-const INITIAL_MESSAGE = {
-  id: 1,
-  role: 'ai',
-  text: 'Clinical assistant online. Ask for summaries, interactions, lab interpretation, ICD-10 support, or guideline references.',
-  timestamp: 'Just now',
-  chips: ['Summarize Jane Doe history', 'Check drug interactions', 'Interpret CBC results', 'Find ICD-10 codes'],
+function getInitialMessage(patientName) {
+  const patientLabel = patientName || 'the selected patient'
+  return {
+    id: 1,
+    role: 'ai',
+    text: 'Clinical assistant online. Ask for summaries, interactions, lab interpretation, ICD-10 support, or guideline references.',
+    timestamp: 'Just now',
+    chips: [`Summarize ${patientLabel} history`, 'Check drug interactions', 'Interpret lab results', 'Find ICD-10 codes'],
+  }
 }
 
-const WELCOME_CARDS = [
-  {
-    title: 'Review Patient Record',
-    desc: 'Summarize history for Jane Doe',
-    prompt: 'Summarize Jane Doe\'s medical history and flag any concerns',
-    icon: FileSearchIcon,
-    tone: 'text-indigo-500',
-    toneBg: 'bg-indigo-50 dark:bg-indigo-950/50',
-  },
-  {
-    title: 'Drug Interaction Check',
-    desc: 'Check medications for interactions',
-    prompt: 'Check for drug interactions in Jane Doe\'s current medications: Metformin, Lisinopril, Vitamin D3',
-    icon: PillIcon,
-    tone: 'text-amber-500',
-    toneBg: 'bg-amber-50 dark:bg-amber-950/40',
-  },
-  {
-    title: 'Interpret Lab Results',
-    desc: 'Explain recent blood panel values',
-    prompt: 'Interpret Jane Doe\'s recent CBC results: Hemoglobin 11.2, WBC 6.8, Platelets 245',
-    icon: FlaskConicalIcon,
-    tone: 'text-teal-500',
-    toneBg: 'bg-teal-50 dark:bg-teal-950/40',
-  },
-  {
-    title: 'ICD-10 Code Lookup',
-    desc: 'Find diagnosis codes by symptom',
-    prompt: 'What ICD-10 codes apply for a patient with persistent headache and low-grade fever?',
-    icon: BookOpenIcon,
-    tone: 'text-violet-500',
-    toneBg: 'bg-violet-50 dark:bg-violet-950/40',
-  },
-]
+function getWelcomeCards(patientName) {
+  const patientLabel = patientName || 'the selected patient'
+  return [
+    {
+      title: 'Review Patient Record',
+      desc: `Summarize history for ${patientLabel}`,
+      prompt: `Summarize ${patientLabel}'s medical history and flag any concerns`,
+      icon: FileSearchIcon,
+      tone: 'text-indigo-500',
+      toneBg: 'bg-indigo-50 dark:bg-indigo-950/50',
+    },
+    {
+      title: 'Drug Interaction Check',
+      desc: 'Check medications for interactions',
+      prompt: `Check for drug interactions in ${patientLabel}'s current medications`,
+      icon: PillIcon,
+      tone: 'text-amber-500',
+      toneBg: 'bg-amber-50 dark:bg-amber-950/40',
+    },
+    {
+      title: 'Interpret Lab Results',
+      desc: 'Explain recent blood panel values',
+      prompt: `Interpret ${patientLabel}'s recent lab results`,
+      icon: FlaskConicalIcon,
+      tone: 'text-teal-500',
+      toneBg: 'bg-teal-50 dark:bg-teal-950/40',
+    },
+    {
+      title: 'ICD-10 Code Lookup',
+      desc: 'Find diagnosis codes by symptom',
+      prompt: 'What ICD-10 codes apply for a patient with persistent headache and low-grade fever?',
+      icon: BookOpenIcon,
+      tone: 'text-violet-500',
+      toneBg: 'bg-violet-50 dark:bg-violet-950/40',
+    },
+  ]
+}
 
 function Tooltip({ label, children }) {
   return (
@@ -221,8 +228,10 @@ Tooltip.propTypes = {
   children: PropTypes.node.isRequired,
 }
 
-export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
-  const [messages, setMessages] = useState([INITIAL_MESSAGE])
+export default function DoctorChatView({ navigateTo, selectedPatient }) {
+  const activePatientName = selectedPatient?.patient_name || selectedPatient?.name || selectedPatient?.full_name || 'the patient'
+  const welcomeCards = useMemo(() => getWelcomeCards(activePatientName), [activePatientName])
+  const [messages, setMessages] = useState(() => [getInitialMessage(activePatientName)])
   const [inputValue, setInputValue] = useState('')
   const [isTyping, setIsTyping] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(true)
@@ -233,7 +242,15 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
   const sessionRef = useRef(null)
   const abortRef = useRef(null)
 
-  const activePatientName = selectedPatient?.name || selectedPatient?.full_name || 'the patient'
+  useEffect(() => {
+    abortRef.current?.abort()
+    sessionRef.current = null
+    setMessages([getInitialMessage(activePatientName)])
+    setShowSuggestions(true)
+    setIsTyping(false)
+    setInputValue('')
+    setFeedbackById({})
+  }, [selectedPatient?.id, selectedPatient?.patient_id, activePatientName])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -338,7 +355,7 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
   const clearConversation = () => {
     abortRef.current?.abort()
     sessionRef.current = null
-    setMessages([INITIAL_MESSAGE])
+    setMessages([getInitialMessage(activePatientName)])
     setShowSuggestions(true)
     setIsTyping(false)
     setInputValue('')
@@ -366,8 +383,9 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
   }
 
   const aiMessageCount = messages.filter((m) => m.role === 'ai').length
-  const hasVisibleAiContent = messages.some(
-    (m) => m.role === 'ai' && (m.text || '').trim().length > 0,
+  const latestMessage = messages[messages.length - 1]
+  const isWaitingForFirstAiChunk = isTyping && !(
+    latestMessage?.role === 'ai' && (latestMessage.text || '').trim().length > 0
   )
 
   return (
@@ -444,7 +462,7 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
             </div>
 
             <div className="mt-5 grid grid-cols-2 gap-3">
-              {WELCOME_CARDS.map((card) => {
+              {welcomeCards.map((card) => {
                 const Icon = card.icon
                 return (
                   <button
@@ -494,7 +512,7 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
                       <div className="message-in max-w-[85%] rounded-[20px] rounded-tl-[6px] border border-slate-200 bg-white px-5 py-4 shadow-sm dark:border-[#252530] dark:bg-[#111118] dark:shadow-none">
                         <div className="flex flex-col gap-3">
-                          <p className="text-sm leading-relaxed text-slate-600 dark:text-[#c8c8e0]">{message.text}</p>
+                          <AiMessageContent text={message.text} />
 
                           {Array.isArray(message.chips) && message.chips.length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-2 border-t border-slate-100 pt-1 dark:border-[#1c1c25]">
@@ -591,7 +609,7 @@ export default function DoctorChatView({ navigateTo, selectedPatient, user }) {
               </div>
             )}
 
-            {isTyping && !hasVisibleAiContent && (
+            {isWaitingForFirstAiChunk && (
               <div className="flex items-start gap-3">
                 <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-400 to-violet-600 text-white shadow-[0_2px_8px_rgba(99,102,241,0.3)]">
                   <span className="inline-flex h-4 w-4"><SparklesIcon /></span>
@@ -672,6 +690,8 @@ DoctorChatView.propTypes = {
   navigateTo: PropTypes.func.isRequired,
   selectedPatient: PropTypes.shape({
     id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    patient_id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    patient_name: PropTypes.string,
     name: PropTypes.string,
     full_name: PropTypes.string,
   }),

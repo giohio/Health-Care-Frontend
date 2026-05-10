@@ -25,8 +25,8 @@ import { IconUsers, IconCalendar, IconSearch } from '../../icons'
 // Do not display real patient data without backend verification.
 const FALLBACK_PATIENT = {
   id: 'PT-2024-0142',
-  name: 'Jane Doe',
-  initials: 'JD',
+  name: 'Selected Patient',
+  initials: 'SP',
   age: 36,
   gender: 'Female',
   blood: 'O+',
@@ -1256,7 +1256,7 @@ export default function EMRWorkspaceView({
       newOrders.push({
         id: nextId,
         patientId: patientUserId || selectedPatientId,
-        patientName: selectedPatient?.patient_name || selectedPatient?.name || 'Jane Doe',
+        patientName: selectedPatient?.patient_name || selectedPatient?.name || patient.name,
         tests: [testObj.name],
         orderedBy: clinicianName,
         orderedAt,
@@ -2639,7 +2639,7 @@ export default function EMRWorkspaceView({
                     <div className="mb-5">
                       <p className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Order Details</p>
                       <p className="mt-0.5 text-xs text-slate-500 dark:text-[#70708a]">
-                        Set priority and add a clinical note for {selectedPatient?.name || 'Jane Doe'}
+                        Set priority and add a clinical note for {patient.name}
                       </p>
                     </div>
 
@@ -2847,7 +2847,7 @@ export default function EMRWorkspaceView({
                       <div>
                         <p className="text-base font-semibold text-slate-900 dark:text-[#eeeef5]">Review Order</p>
                         <p className="mt-0.5 text-xs text-slate-500 dark:text-[#70708a]">
-                          {selectedPatient?.name || 'Jane Doe'} · {selectedPatient?.id || 'PT-2024-0142'}
+                          {patient.name} · {selectedPatient?.id || selectedPatient?.patient_id || 'PT-2024-0142'}
                         </p>
                       </div>
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-slate-100 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-700 dark:border-[#1c1c25] dark:bg-[#16161e] dark:text-[#c8c8e0]">
@@ -2922,7 +2922,7 @@ export default function EMRWorkspaceView({
                     <div className="mb-3 flex items-center justify-between rounded-xl border border-slate-100 px-4 py-3 dark:border-[#1c1c25]">
                       <span className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-[#c8c8e0]">
                         <span className="inline-flex h-4 w-4 text-slate-400"><EyeIcon /></span>
-                        {selectedPatient?.name || 'Jane Doe'} · {selectedPatient?.id || 'PT-2024-0142'}
+                        {patient.name} · {selectedPatient?.id || selectedPatient?.patient_id || 'PT-2024-0142'}
                       </span>
                       <span className="text-xs text-slate-500 dark:text-[#70708a]">
                         Today · {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

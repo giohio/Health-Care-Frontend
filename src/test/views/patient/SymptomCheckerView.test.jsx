@@ -16,6 +16,7 @@ vi.mock('../../../api/ai.js', () => ({
   symptomCheck: vi.fn(),
   streamSSE: vi.fn(),
   getTriageSession: vi.fn(),
+  getTriageSessions: vi.fn(),
   transcribeSpeech: vi.fn(),
   getTriageSessionSummary: vi.fn(),
 }))
@@ -37,11 +38,11 @@ vi.mock('../../../data/aiAnalysis.js', () => ({
 
 // AiMessageContent can be a passthrough for tests
 vi.mock('../../../components/shared/AiMessageContent.jsx', () => ({
-  default: ({ content }) => <span data-testid="ai-content">{content}</span>,
+  default: ({ text }) => <span data-testid="ai-content">{text}</span>,
 }))
 
 import SymptomCheckerView from '../../../views/patient/SymptomCheckerView.jsx'
-import { symptomCheck, streamSSE, getTriageSession } from '../../../api/ai.js'
+import { symptomCheck, streamSSE, getTriageSession, getTriageSessions } from '../../../api/ai.js'
 
 // ─── Test data ────────────────────────────────────────────────────────────────
 
@@ -81,10 +82,13 @@ beforeEach(() => {
     Promise.resolve().then(() => onDone?.())
   })
   getTriageSession.mockResolvedValue(null)
+  getTriageSessions.mockResolvedValue({ sessions: [] })
+  sessionStorage.clear()
 })
 
 afterEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
 })
 
 // ─── Initial rendering ────────────────────────────────────────────────────────
@@ -331,5 +335,32 @@ describe('initialTriageId', () => {
 
     // Welcome cards are hidden when initialTriageId is set (showSuggestions starts false)
     expect(screen.queryByText('Fever or Infection')).not.toBeInTheDocument()
+  })
+})
+
+describe('conversation restore', () => {
+  it('loads the latest server conversation when local session cache is missing', async () => {
+    getTriageSessions.mockResolvedValue({
+      sessions: [
+        {
+          id: 'triage-latest',
+          suggested_department: 'General Medicine',
+          urgency_level: 'Priority',
+          status: 'pending_review',
+          messages: [
+            { role: 'user', content: 'I have fever and cough' },
+            { role: 'assistant', content: '[R] I recommend General Medicine.' },
+          ],
+        },
+      ],
+    })
+
+    renderView()
+
+    await waitFor(() => {
+      expect(getTriageSessions).toHaveBeenCalled()
+      expect(screen.getByText('I have fever and cough')).toBeInTheDocument()
+      expect(screen.getByTestId('ai-content')).toHaveTextContent('I recommend General Medicine')
+    })
   })
 })

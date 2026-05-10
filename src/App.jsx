@@ -144,6 +144,10 @@ export default function App() {
     setAdminNavExpanded(size !== 'collapsed')
   }
 
+  useEffect(() => {
+    localStorage.setItem('healthai-theme', dark ? 'dark' : 'light')
+  }, [dark])
+
   // Hydrate in-memory access token first, then fetch current user
   useEffect(() => {
     initializeToken()
@@ -668,10 +672,12 @@ export default function App() {
       className={`${dark ? 'dark' : ''} app-root flex h-screen overflow-hidden overflow-x-hidden w-full max-w-full`}
     >
       {currentUser?.role === 'patient' && !currentUser?.is_profile_completed && (
-        <ProfileSetupView
-          currentUser={currentUser}
-          onComplete={(updatedUser) => setCurrentUser(deriveUserMeta({ ...currentUser, ...updatedUser, is_profile_completed: true }))}
-        />
+        <main className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto bg-[#f8fafc] px-4 py-10 dark:bg-[#08080f] sm:px-6 sm:py-12">
+          <ProfileSetupView
+            currentUser={currentUser}
+            onComplete={(updatedUser) => setCurrentUser(deriveUserMeta({ ...currentUser, ...updatedUser, is_profile_completed: true }))}
+          />
+        </main>
       )}
 
       {currentUser?.role === 'patient' && currentUser?.is_profile_completed && (

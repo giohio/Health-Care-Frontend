@@ -542,6 +542,20 @@
 /* AI markdown prose — minimal spacing overrides */
 .ai-prose > :first-child { margin-top: 0; }
 .ai-prose > :last-child { margin-bottom: 0; }
+.ai-prose h3 {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 0.75rem;
+}
+.ai-prose h3:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.ai-prose li + li {
+  margin-top: 0.25rem;
+}
+.dark .ai-prose h3 {
+  border-top-color: #252530;
+}
 
 .sched-work-tabs {
   margin-bottom: 1rem;

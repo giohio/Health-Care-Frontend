@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import { SYMPTOM_SPECIALTY_SUGGESTIONS } from '../../data/aiAnalysis'
-import { symptomCheck, streamSSE, transcribeSpeech, getTriageSession } from '../../api/ai'
+import { symptomCheck, streamSSE, transcribeSpeech, getTriageSession, getTriageSessions } from '../../api/ai'
 import AiMessageContent from '../../components/shared/AiMessageContent'
 import {
   ChevronLeftIcon, SparklesIcon, RotateCcwIcon, CalendarPlusIcon,
@@ -312,6 +312,23 @@ export default function SymptomCheckerView({ setCurrentView, currentUser, initia
     setShowSuggestions(msgs.length === 0)
   }
 
+  const loadLatestServerSession = async ({ skipIfCleared = true } = {}) => {
+    if (!storageKey || initialTriageId) return false
+    if (skipIfCleared) {
+      try {
+        const saved = sessionStorage.getItem(storageKey)
+        if (saved && JSON.parse(saved)?.cleared) return false
+      } catch { /* ignore malformed storage */ }
+    }
+
+    const res = await getTriageSessions()
+    const sessions = res?.sessions ?? res?.data?.sessions ?? (Array.isArray(res) ? res : [])
+    const latest = sessions.find((session) => Array.isArray(session.messages) && session.messages.length > 0)
+    if (!latest?.id) return false
+    hydrateFromSession(latest)
+    return true
+  }
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isTyping])
@@ -341,19 +358,32 @@ export default function SymptomCheckerView({ setCurrentView, currentUser, initia
   useEffect(() => {
     if (initialTriageId) return
     const sid = (sessionIdRef.current || '').trim()
-    if (!sid) return
 
     let canceled = false
-    getTriageSession(sid)
-      .then((res) => {
+    const restore = async () => {
+      if (!sid) {
+        await loadLatestServerSession()
+        return
+      }
+
+      try {
+        const res = await getTriageSession(sid)
         if (canceled) return
         const session = res?.data ?? res
-        if (!session?.id) return
+        if (!session?.id) {
+          await loadLatestServerSession()
+          return
+        }
         hydrateFromSession(session)
-      })
-      .catch(() => {})
+      } catch {
+        if (!canceled) await loadLatestServerSession({ skipIfCleared: false })
+      }
+    }
+
+    restore().catch(() => {})
 
     return () => { canceled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTriageId, storageKey])
 
   const updateAiMessage = (id, text) => {
@@ -513,7 +543,14 @@ export default function SymptomCheckerView({ setCurrentView, currentUser, initia
     setAiSpecialties([])
     setCreatedAppointment(null)
     sessionIdRef.current = null
-    if (storageKey) sessionStorage.removeItem(storageKey)
+    if (storageKey) {
+      sessionStorage.setItem(storageKey, JSON.stringify({
+        messages: [getInitialMessage(patientFirstName)],
+        sessionId: null,
+        nextMessageId: nextMessageIdRef.current,
+        cleared: true,
+      }))
+    }
   }
 
   const refreshConversation = async () => {
