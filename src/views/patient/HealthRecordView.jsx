@@ -140,7 +140,11 @@ export default function HealthRecordView({ currentUser }) {
       try {
         const nData = await clinicalApi.getNotes(currentUser.id)
         const notes = Array.isArray(nData) ? nData : (nData?.notes ?? nData?.data ?? [])
-        setVisitNotes(Array.isArray(notes) ? notes.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)) : [])
+        setVisitNotes(Array.isArray(notes)
+          ? notes
+            .filter((note) => String(note?.note_type || '').toLowerCase() !== 'summary')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          : [])
       } catch {
         setVisitNotes([])
       }

@@ -130,7 +130,6 @@ export default function EMRWorkspace({
   const [icdCodes, setIcdCodes] = useState([])
   const [lastSaved, setLastSaved] = useState('Not saved')
   const [isAiGenerating, setIsAiGenerating] = useState(false)
-  const [savedNoteIds, setSavedNoteIds] = useState({})
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
   const [latestSummaryContent, setLatestSummaryContent] = useState('')
 
@@ -272,7 +271,6 @@ export default function EMRWorkspace({
 
   const loadClinicalNotes = useCallback(() => {
     if (!patientUserId) {
-      setSavedNoteIds({})
       setLatestSummaryContent('')
       return Promise.resolve([])
     }
@@ -281,12 +279,6 @@ export default function EMRWorkspace({
       .then((notes) => {
         const list = Array.isArray(notes) ? notes : []
         const sorted = [...list].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
-        const nextIds = {}
-        sorted.forEach((note) => {
-          const type = normalizeNoteType(note.note_type)
-          if (!nextIds[type]) nextIds[type] = note.id
-        })
-        setSavedNoteIds(nextIds)
 
         const latestSoap = sorted.find((note) => normalizeNoteType(note.note_type) === 'soap' && note.content)
         if (latestSoap) {
@@ -301,7 +293,6 @@ export default function EMRWorkspace({
       })
       .catch((err) => {
         console.error('Failed to load clinical notes:', err)
-        setSavedNoteIds({})
         setLatestSummaryContent('')
         return []
       })
@@ -420,24 +411,18 @@ export default function EMRWorkspace({
     if (!patientUserId || !user?.id) throw new Error('Missing patient or doctor context')
 
     const normalizedType = normalizeNoteType(noteType)
-    const existingId = savedNoteIds[normalizedType]
-    const saved = existingId
-      ? await clinicalApi.updateNote(existingId, { content })
-      : await clinicalApi.createNote(patientUserId, {
-          content,
-          note_type: normalizedType,
-          appointment_id: apptId || undefined,
-          doctor_id: user.id,
-          is_ai_generated: isAiGenerated,
-        })
+    const saved = await clinicalApi.upsertCurrentNote(patientUserId, {
+      content,
+      note_type: normalizedType,
+      appointment_id: apptId || undefined,
+      doctor_id: user.id,
+      is_ai_generated: isAiGenerated,
+    })
 
-    if (saved?.id) {
-      setSavedNoteIds((current) => ({ ...current, [normalizedType]: saved.id }))
-    }
     if (normalizedType === 'summary') setLatestSummaryContent(content)
     setHistoryRefreshKey((value) => value + 1)
     return saved
-  }, [apptId, patientUserId, savedNoteIds, user?.id])
+  }, [apptId, patientUserId, user?.id])
 
   const handleSaveNote = useCallback(async () => {
     const contentToSave = noteTemplate === 'soap'

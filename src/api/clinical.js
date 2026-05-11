@@ -52,10 +52,21 @@ export const clinicalApi = {
       body: JSON.stringify(data),
     }),
 
+  upsertCurrentNote: (patientId, data) =>
+    apiFetch(`/clinical/patients/${patientId}/notes/current`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
   updateNote: (noteId, data) =>
     apiFetch(`/clinical/notes/${noteId}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
+    }),
+
+  deleteNote: (noteId) =>
+    apiFetch(`/clinical/notes/${noteId}`, {
+      method: 'DELETE',
     }),
 
   // GET /clinical/patients/{patient_id}/vaccinations

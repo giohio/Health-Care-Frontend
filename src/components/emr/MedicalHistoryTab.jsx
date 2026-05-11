@@ -29,6 +29,10 @@ function statusTone(status) {
   return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300'
 }
 
+function isClinicalHistoryNote(note) {
+  return String(note?.note_type || '').toLowerCase() !== 'summary'
+}
+
 function SectionCard({ title, subtitle, children, count }) {
   return (
     <section className="rounded-3xl border border-slate-200/60 bg-white p-6 shadow-sm dark:border-[#252530]/60 dark:bg-[#111118]">
@@ -107,7 +111,9 @@ export default function MedicalHistoryTab({ patientId, refreshKey }) {
   }, [patientId, refreshKey])
 
   const sortedNotes = useMemo(
-    () => [...notes].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
+    () => notes
+      .filter(isClinicalHistoryNote)
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)),
     [notes],
   )
 
