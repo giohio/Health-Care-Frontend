@@ -6,6 +6,44 @@ export function stripAiWarning(text) {
     .trim()
 }
 
+export function normalizeAiDraftForDisplay(text) {
+  if (!text) return ''
+  return stripAiWarning(text)
+    .replace(/\r\n/g, '\n')
+    .replace(/\s*\*\*(\d+\.\s+[^*]+)\*\*\s*/g, '\n\n### $1\n')
+    .replace(/\s+\*\s+(?=\*\*|[A-Z0-9])/g, '\n- ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function stripMarkdown(text) {
+  return String(text || '')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*[-*]\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function aiDraftPreview(text, maxLength = 220) {
+  const normalized = normalizeAiDraftForDisplay(text)
+  if (!normalized) return ''
+
+  const summaryMatch = normalized.match(/###\s*1\.\s+Key Findings Summary\s*([\s\S]*?)(?=\n\n###\s*2\.|$)/i)
+  const source = summaryMatch?.[1] || normalized
+  const bullets = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s+/.test(line))
+    .slice(0, 2)
+    .map(stripMarkdown)
+
+  const preview = bullets.length > 0 ? bullets.join(' ') : stripMarkdown(source)
+  if (preview.length <= maxLength) return preview
+  return `${preview.slice(0, maxLength).trimEnd()}...`
+}
+
 export function parseAiDraft(aiDraftText) {
   if (!aiDraftText) return ''
   const trimmed = aiDraftText.trim()
@@ -52,13 +90,15 @@ function buildClinicalImpression(abnormal) {
 
 export function detectPriority(text) {
   if (!text) return null
-  const m = text.match(/priority\s*level[:\s*_]*([^\n*]+)/i)
+  const m = text.match(/priority(?:\s*level)?[:\s*_]*([^\n*]+)/i)
   if (!m) return null
   const v = m[1].toLowerCase().replace(/[*_]/g, '').trim()
+  if (v.includes('routine') || v.includes('low')) return 'low'
   if (v.includes('urgent') || v.includes('critical') || v.includes('emergent')) return 'urgent'
   if (v.includes('high')) return 'high'
+  if (v.includes('priority')) return 'priority'
   if (v.includes('moderate') || v.includes('medium')) return 'moderate'
-  return 'low'
+  return null
 }
 
 export function normalizeStatus(s) {

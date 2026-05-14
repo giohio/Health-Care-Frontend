@@ -8,6 +8,7 @@ import AiDisclaimer from '../../components/shared/AiDisclaimer'
 import { labChat, streamSSE } from '../../api/ai'
 import { emrApi } from '../../api/emr'
 import AiMessageContent from '../../components/shared/AiMessageContent'
+import { normalizeAiDraftForDisplay } from '../../components/emr/labResultUtils'
 
 const DEFAULT_LAB = {
   id: 1,
@@ -95,12 +96,14 @@ function findAiFlag(flags, marker) {
 
 function flagStatusClass(status) {
   if (status === 'low') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300'
+  if (status === 'critical') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300'
   if (status === 'high') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300'
   return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-[#252530] dark:bg-[#1c1c25] dark:text-[#70708a]'
 }
 
 function flagStatusLabel(status) {
   if (status === 'low') return 'Low'
+  if (status === 'critical') return 'Critical'
   if (status === 'high') return 'High'
   return 'Normal'
 }
@@ -178,6 +181,20 @@ function analysisStatusLabel(status) {
   return 'Abnormal'
 }
 
+function confidencePercent(value) {
+  if (value == null) return null
+  const num = Number(value)
+  if (!Number.isFinite(num)) return null
+  return Math.round(num <= 1 ? num * 100 : num)
+}
+
+function extractAiSection(text, sectionNumber) {
+  const normalized = normalizeAiDraftForDisplay(text)
+  if (!normalized) return ''
+  const pattern = new RegExp(`###\\s*${sectionNumber}\\.\\s+[^\\n]+\\n([\\s\\S]*?)(?=\\n\\n###\\s*\\d+\\.|$)`, 'i')
+  return normalized.match(pattern)?.[1]?.trim() || ''
+}
+
 export default function LabResultDetailView({ setCurrentView, selectedLab }) {
   const lab = selectedLab || DEFAULT_LAB
   const isNew = lab.status === 'New'
@@ -199,33 +216,53 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
     const parsed = typeof raw === 'string'
       ? (() => { try { return JSON.parse(raw) } catch { return [] } })()
       : raw
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter(f => f.flag && f.flag !== 'normal' && f.flag !== 'N')
+    const rows = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.findings)
+        ? parsed.findings
+        : []
+    if (rows.length === 0) return []
+    return rows
+      .filter(f => {
+        const rawStatus = f.flag ?? f.status
+        const normalized = String(rawStatus || '').toLowerCase()
+        return rawStatus && !['normal', 'n', 'not_applicable'].includes(normalized)
+      })
       .map(f => {
         const unitSuffix = f.unit ? ` ${f.unit}` : ''
         const displayValue = f.value ? `${f.value}${unitSuffix}` : (f.severity || '-')
-        const hasRef = f.reference_low === undefined
-        const aiNote = hasRef
-          ? (f.region || f.location || '')
-          : `Ref: ${f.reference_low}–${f.reference_high} ${f.unit || ''}`.trim()
+        const hasRefBounds = f.reference_low !== undefined && f.reference_high !== undefined
+        const aiNote = hasRefBounds
+          ? `Ref: ${f.reference_low}–${f.reference_high} ${f.unit || ''}`.trim()
+          : f.reference_range || f.ref_range || f.reference || f.region || f.location || ''
+        const normalizedStatus = String((f.flag ?? f.status) || '').toLowerCase()
+        const status = normalizedStatus.includes('critical')
+          ? 'critical'
+          : normalizedStatus === 'h' || normalizedStatus === 'high'
+            ? 'high'
+            : normalizedStatus === 'l' || normalizedStatus === 'low'
+              ? 'low'
+              : 'normal'
         return {
           marker: f.name || f.finding || 'Finding',
           value: displayValue,
-          status: (f.flag === 'H' || f.flag === 'high') ? 'high' : 'low',
-          aiNote,
+          status,
+          aiNote: aiNote
+            ? (String(aiNote).startsWith('Ref:') ? aiNote : `Ref: ${aiNote}`)
+            : '',
         }
       })
   }
 
   const aiData = staticAiData || (hasRealAiData ? {
     riskLevel: resolveRiskLevel(lab.ai_confidence),
-    confidence: lab.ai_confidence == null ? null : Math.round(lab.ai_confidence * 100),
+    confidence: confidencePercent(lab.ai_confidence),
     modelName: 'HealthAI',
     modelType: 'Clinical Analysis',
     dataset: 'EMR Pipeline',
     flags: resolveRealFlags(),
-    recommendation: lab.aiSummary || lab.ai_draft_text || '',
+    recommendation: extractAiSection(lab.published_text || lab.ai_draft_text || lab.aiSummary || '', 4)
+      || normalizeAiDraftForDisplay(lab.published_text || lab.ai_draft_text || lab.aiSummary || ''),
     disclaimer: 'This AI analysis is intended to assist clinical review and should not replace professional medical judgment.',
   } : null)
 
@@ -340,7 +377,7 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
           </div>
 
           <div className="px-6 pb-4">
-            <p className="text-sm leading-relaxed text-slate-700 dark:text-[#c8c8e0]">{lab.explanation}</p>
+            <AiMessageContent text={normalizeAiDraftForDisplay(lab.explanation)} />
           </div>
 
           {aiData.flags.length > 0 && (
@@ -374,7 +411,7 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 dark:border-indigo-900/40 dark:bg-indigo-950/40">
               <div className="flex items-start gap-3">
                 <span className="mt-0.5 flex-shrink-0 text-indigo-500 dark:text-indigo-400"><LightbulbIcon /></span>
-                <p className="text-sm leading-relaxed text-slate-700 dark:text-[#c8c8e0]">{aiData.recommendation}</p>
+                <AiMessageContent text={aiData.recommendation} />
               </div>
             </div>
           </div>
@@ -439,82 +476,84 @@ export default function LabResultDetailView({ setCurrentView, selectedLab }) {
         </div>
       </section>
 
-      <section className="la-section" aria-labelledby="la-heading">
-        <div className="la-header">
-          <div className="la-title-wrap">
-            <span className="la-icon">
-              <BotIcon />
-            </span>
-            <h2 id="la-heading" className="la-title">AI Analysis</h2>
+      {!hasRealAiData && (
+        <section className="la-section" aria-labelledby="la-heading">
+          <div className="la-header">
+            <div className="la-title-wrap">
+              <span className="la-icon">
+                <BotIcon />
+              </span>
+              <h2 id="la-heading" className="la-title">AI Analysis</h2>
+            </div>
+            <span className="la-model-badge">{aiLabAnalysis.modelType}</span>
           </div>
-          <span className="la-model-badge">{aiLabAnalysis.modelType}</span>
-        </div>
 
-        {analysisType === 'blood' && aiLabAnalysis.findings && (
-          <article className="la-card">
-            <p className="la-card-title">Blood Panel Insights</p>
-            <div className="la-table-wrap">
-              <table className="la-table">
-                <thead>
-                  <tr>
-                    <th>Metric</th>
-                    <th>Value</th>
-                    <th>Reference Range</th>
-                    <th>Assessment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {aiLabAnalysis.findings.map((item) => (
-                    <tr key={item.name}>
-                      <td>{item.name}</td>
-                      <td>{item.value}</td>
-                      <td>{item.range}</td>
-                      <td>
-                        <span className={analysisStatusClass(item.status)}>{analysisStatusLabel(item.status)}</span>
-                      </td>
+          {analysisType === 'blood' && aiLabAnalysis.findings && (
+            <article className="la-card">
+              <p className="la-card-title">Blood Panel Insights</p>
+              <div className="la-table-wrap">
+                <table className="la-table">
+                  <thead>
+                    <tr>
+                      <th>Metric</th>
+                      <th>Value</th>
+                      <th>Reference Range</th>
+                      <th>Assessment</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {aiLabAnalysis.findings.map((item) => (
+                      <tr key={item.name}>
+                        <td>{item.name}</td>
+                        <td>{item.value}</td>
+                        <td>{item.range}</td>
+                        <td>
+                          <span className={analysisStatusClass(item.status)}>{analysisStatusLabel(item.status)}</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-            <p className="la-summary">{aiLabAnalysis.summary}</p>
-          </article>
-        )}
+              <p className="la-summary">{aiLabAnalysis.summary}</p>
+            </article>
+          )}
 
-        {(analysisType === 'ecg' || analysisType === 'imaging') && (
-          <article className="la-card">
-            <p className="la-card-title">AI Pattern Interpretation</p>
-            <p className="la-summary">{aiLabAnalysis.description}</p>
+          {(analysisType === 'ecg' || analysisType === 'imaging') && (
+            <article className="la-card">
+              <p className="la-card-title">AI Pattern Interpretation</p>
+              <p className="la-summary">{aiLabAnalysis.description}</p>
 
-            <div className="la-confidence-row">
-              <span className="la-confidence-label">Confidence</span>
-              <span className="la-confidence-value">{aiLabAnalysis.confidence}%</span>
-            </div>
-            <div className="la-confidence-track" aria-hidden="true">
-              <span className="la-confidence-fill" style={{ width: `${aiLabAnalysis.confidence}%` }} />
-            </div>
+              <div className="la-confidence-row">
+                <span className="la-confidence-label">Confidence</span>
+                <span className="la-confidence-value">{aiLabAnalysis.confidence}%</span>
+              </div>
+              <div className="la-confidence-track" aria-hidden="true">
+                <span className="la-confidence-fill" style={{ width: `${aiLabAnalysis.confidence}%` }} />
+              </div>
 
-            <p className="la-summary">{aiLabAnalysis.summary}</p>
-          </article>
-        )}
+              <p className="la-summary">{aiLabAnalysis.summary}</p>
+            </article>
+          )}
 
-        {analysisType === 'default' && (
-          <article className="la-card">
-            <p className="la-card-title">AI Summary</p>
-            <p className="la-summary">{aiLabAnalysis.summary}</p>
-          </article>
-        )}
+          {analysisType === 'default' && (
+            <article className="la-card">
+              <p className="la-card-title">AI Summary</p>
+              <p className="la-summary">{aiLabAnalysis.summary}</p>
+            </article>
+          )}
 
-        <div className="la-disclaimer">
-          <AiDisclaimer
-            text="AI analysis is for reference only and does not replace a physician diagnosis."
-            modelName={aiLabAnalysis.modelType}
-            dataset={analysisType === 'blood' ? 'Structured Lab Panel' : 'Signals & Clinical Notes'}
-            analyzedAt={`Confidence ${aiLabAnalysis.confidence}%`}
-          />
-        </div>
-      </section>
+          <div className="la-disclaimer">
+            <AiDisclaimer
+              text="AI analysis is for reference only and does not replace a physician diagnosis."
+              modelName={aiLabAnalysis.modelType}
+              dataset={analysisType === 'blood' ? 'Structured Lab Panel' : 'Signals & Clinical Notes'}
+              analyzedAt={`Confidence ${aiLabAnalysis.confidence}%`}
+            />
+          </div>
+        </section>
+      )}
 
       <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white/70 backdrop-blur-xl dark:border-[#252530] dark:bg-[#111118]/80">
         <div className="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4 dark:border-[#1c1c25]">

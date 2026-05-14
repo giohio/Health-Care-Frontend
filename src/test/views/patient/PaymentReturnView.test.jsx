@@ -38,4 +38,26 @@ describe('PaymentReturnView', () => {
 
     expect(onViewAppointments).toHaveBeenCalledOnce()
   })
+
+  it('shows payment history action for lab payment returns', async () => {
+    const user = userEvent.setup()
+    const onViewPayments = vi.fn()
+    const onViewAppointments = vi.fn()
+
+    render(
+      <PaymentReturnView
+        status="success"
+        paymentType="LAB_ORDER_BUNDLE"
+        onViewAppointments={onViewAppointments}
+        onViewPayments={onViewPayments}
+        onRetry={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole('button', { name: /view payments/i }))
+
+    expect(screen.getByText(/lab payment has been received/i)).toBeInTheDocument()
+    expect(onViewPayments).toHaveBeenCalledOnce()
+    expect(onViewAppointments).not.toHaveBeenCalled()
+  })
 })

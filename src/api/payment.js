@@ -48,6 +48,12 @@ export const paymentApi = {
       suppressErrorStatuses: [404],
     }),
 
+  paySelectedLabOrders: (labOrderIds) =>
+    apiFetch('/payments/lab-orders/pay-selected', {
+      method: 'POST',
+      body: JSON.stringify({ lab_order_ids: labOrderIds }),
+    }),
+
   // Admin: mark refund as processed
   markRefunded: (paymentId) =>
     apiFetch(`/payments/${paymentId}/mark-refunded`, { method: 'POST' }),

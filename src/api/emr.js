@@ -89,6 +89,12 @@ export const emrApi = {
   retryLabResultAi: (resultId) =>
     apiFetch(`/lab-results/${resultId}/retry-ai`, { method: 'POST' }),
 
+  replaceLabResultInput: (resultId, data) =>
+    apiFetch(`/lab-results/${resultId}/replace-input`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   downloadLabResultPDF: async (resultId) => {
     const response = await fetch(`/lab-results/${resultId}/pdf`, {
       method: 'GET',

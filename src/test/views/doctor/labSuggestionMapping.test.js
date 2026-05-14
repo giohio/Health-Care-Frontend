@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 
-import { LAB_TESTS } from '../../../views/doctor/emr/EmrData'
+import { DEFAULT_LAB_PRICES, LAB_TESTS } from '../../../views/doctor/emr/EmrData'
 import { resolveSuggestedTestIds } from '../../../views/doctor/emr/labSuggestionMapping'
 
 describe('resolveSuggestedTestIds', () => {
@@ -30,5 +30,10 @@ describe('resolveSuggestedTestIds', () => {
     const result = resolveSuggestedTestIds(suggested, LAB_TESTS, [])
 
     expect(result).toEqual(['ct_chest', 'mri_brain', 'ultrasound_abdomen', 'xray_chest'])
+  })
+
+  it('includes fallback prices for auscultation orders', () => {
+    expect(DEFAULT_LAB_PRICES.lung_sounds).toBe(180000)
+    expect(DEFAULT_LAB_PRICES.heart_sounds).toBe(220000)
   })
 })

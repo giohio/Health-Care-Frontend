@@ -85,9 +85,10 @@ export default function App() {
     const params = new URLSearchParams(globalThis.location.search)
     const status = params.get('status')
     const txnRef = params.get('txn_ref')
+    const paymentType = params.get('payment_type') || ''
     if (!status || !txnRef) return null
     globalThis.history.replaceState({}, '', globalThis.location.pathname)
-    return { status, txnRef }
+    return { status, txnRef, paymentType }
   })
 
   const [dark, setDark] = useState(() => localStorage.getItem('healthai-theme') === 'dark')
@@ -352,7 +353,9 @@ export default function App() {
         <PaymentReturnView
           status={paymentReturn.status}
           txnRef={paymentReturn.txnRef}
+          paymentType={paymentReturn.paymentType}
           onViewAppointments={() => navigatePatient('appointments')}
+          onViewPayments={() => navigatePatient('payment-history')}
           onRetry={() => navigatePatient('booking-wizard')}
         />,
       )
@@ -431,7 +434,9 @@ export default function App() {
           <PaymentReturnView
             status={paymentReturn?.status}
             txnRef={paymentReturn?.txnRef}
+            paymentType={paymentReturn?.paymentType}
             onViewAppointments={() => navigatePatient('appointments')}
+            onViewPayments={() => navigatePatient('payment-history')}
             onRetry={() => navigatePatient('booking-wizard')}
           />,
         )

@@ -174,7 +174,6 @@ export default function LabResultReviewView({ labOrders, setLabOrders, onNotify,
   const [loadingResults, setLoadingResults]   = useState(true)
   const [justPublishedId, setJustPublishedId] = useState(null)
   const [verifyingId, setVerifyingId]         = useState(null)
-  const [retryingId, setRetryingId]           = useState(null)
   const [uploadModal, setUploadModal]         = useState(null)
   const [verifyModal, setVerifyModal]         = useState(null)
   const [deletingId, setDeletingId]           = useState(null)
@@ -586,35 +585,16 @@ const cards = useMemo(() => {
                           <span className="inline-flex h-4 w-4 animate-spin rounded-full border-2 border-sky-400 border-r-transparent" aria-hidden="true" />{' '}
                           AI is analysing the result…
                         </div>
-                        <button
-                          type="button"
-                          disabled={retryingId === result?.id}
-                          onClick={async () => {
-                            if (!result?.id) return
-                            setRetryingId(result.id)
-                            try {
-                              await emrApi.retryLabResultAi(result.id)
-                              onNotify({ type: 'success', message: 'AI analysis re-triggered. Result will update shortly.' })
-                              fetchAll()
-                            } catch (err) {
-                              const msg = err?.message || ''
-                              onNotify({
-                                type: 'error',
-                                message: msg.includes('not in a retryable state')
-                                  ? 'Result chưa ở trạng thái retry được trên backend đang chạy. Vui lòng restart EMR Result Service rồi thử lại.'
-                                  : 'Could not re-trigger AI analysis. Please try again.',
-                              })
-                            } finally {
-                              setRetryingId(null)
-                            }
-                          }}
-                          className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800/50 dark:bg-sky-950/30 dark:text-sky-400 dark:hover:bg-sky-900/40"
-                        >
-                          {retryingId === result?.id
-                            ? <><span className="inline-flex h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-500 border-r-transparent" /> Retrying…</>
-                            : '↺ Retry AI'
-                          }
-                        </button>
+                        {result?.id && (
+                          <button
+                            type="button"
+                            onClick={() => setUploadModal({ ...order, replaceResultId: result.id })}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-400"
+                          >
+                            <span className="inline-flex h-3.5 w-3.5"><UploadIcon /></span>
+                            Upload again
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -658,36 +638,14 @@ const cards = useMemo(() => {
                               : 'Review & Publish…'
                             }
                           </button>
-                          {/* Retry AI — shown when AI failed (NEEDS_MANUAL_REVIEW with no valid draft) */}
-                          {String(result.status || '').toUpperCase() === 'NEEDS_MANUAL_REVIEW' && (
+                          {result?.id && (
                             <button
                               type="button"
-                              disabled={retryingId === result?.id}
-                              onClick={async () => {
-                                if (!result?.id) return
-                                setRetryingId(result.id)
-                                try {
-                                  await emrApi.retryLabResultAi(result.id)
-                                  onNotify({ type: 'success', message: 'AI analysis re-triggered. Result will update shortly.' })
-                                  fetchAll()
-                                } catch (err) {
-                                  const msg = err?.message || ''
-                                  onNotify({
-                                    type: 'error',
-                                    message: msg.includes('not in a retryable state')
-                                      ? 'Result chưa ở trạng thái retry được trên backend đang chạy. Vui lòng restart EMR Result Service rồi thử lại.'
-                                      : 'Could not re-trigger AI analysis. Please try again.',
-                                  })
-                                } finally {
-                                  setRetryingId(null)
-                                }
-                              }}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-sky-800/50 dark:bg-sky-950/30 dark:text-sky-400 dark:hover:bg-sky-900/40"
+                              onClick={() => setUploadModal({ ...order, replaceResultId: result.id })}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-400"
                             >
-                              {retryingId === result?.id
-                                ? <><span className="inline-flex h-3.5 w-3.5 animate-spin rounded-full border-2 border-sky-500 border-r-transparent" /> Retrying…</>
-                                : '↺ Retry AI'
-                              }
+                              <span className="inline-flex h-3.5 w-3.5"><UploadIcon /></span>
+                              Upload again
                             </button>
                           )}
                           {justPublished && <span className="lr-success">✓ Result published</span>}
@@ -715,6 +673,7 @@ const cards = useMemo(() => {
       {uploadModal && (
         <UploadModal
           order={uploadModal}
+          resultId={uploadModal.replaceResultId || null}
           onClose={() => setUploadModal(null)}
           onSuccess={() => { setUploadModal(null); fetchAll() }}
         />

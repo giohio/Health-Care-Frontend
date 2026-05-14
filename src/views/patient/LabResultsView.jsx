@@ -2,31 +2,47 @@ import { useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
 import { IconSparkle } from '../../icons'
 import { LAB_AI_ANALYSIS } from '../../data/aiAnalysis'
-import { PATIENT_FRIENDLY_RESULTS } from '../../data/patientSpecialtyResults'
 import AiRiskBadge from '../../components/shared/AiRiskBadge'
 import { formatRelativeTime, getTimeRemaining } from '../../utils/formatTime'
 import { emrApi } from '../../api/emr'
 import { paymentApi } from '../../api/payment'
 import { Toast } from '../../components/shared/Toast'
-import { stripAiWarning } from '../../components/emr/labResultUtils'
+import { aiDraftPreview, normalizeAiDraftForDisplay, stripAiWarning } from '../../components/emr/labResultUtils'
 
 /** Map a published_findings / ai_visual_findings JSON array to the details row shape. */
 function mapFindingsToDetails(findings) {
-  if (!Array.isArray(findings) || findings.length === 0) return []
-  return findings.map((f) => {
-    // Blood-panel style: { name, value, unit, flag, reference_low, reference_high }
+  const rows = Array.isArray(findings)
+    ? findings
+    : Array.isArray(findings?.findings)
+      ? findings.findings
+      : []
+  if (rows.length === 0) return []
+  return rows.map((f) => {
+    // Blood-panel style: { name, value, unit, flag/status, reference_range/reference_low/reference_high }
     if (f.name && f.value !== undefined) {
       const hasRef = f.reference_low !== undefined && f.reference_high !== undefined
       const ref = hasRef
         ? `${f.reference_low}–${f.reference_high} ${f.unit || ''}`.trim()
-        : (f.unit || '-')
-      const statusMap = { high: 'High', low: 'Low', normal: 'Normal', H: 'High', L: 'Low', N: 'Normal' }
+        : (f.reference_range || f.ref_range || f.reference || '-')
+      const statusMap = {
+        high: 'High',
+        critical_high: 'Critical',
+        low: 'Low',
+        critical_low: 'Critical',
+        normal: 'Normal',
+        not_applicable: 'Normal',
+        H: 'High',
+        L: 'Low',
+        C: 'Critical',
+        N: 'Normal',
+      }
+      const rawStatus = f.flag ?? f.status
       const unitSuffix = f.unit ? ` ${f.unit}` : ''
       return {
         test: f.name,
         yourValue: `${f.value}${unitSuffix}`,
         normalRange: ref || '-',
-        status: statusMap[f.flag] || 'Normal',
+        status: statusMap[rawStatus] || statusMap[String(rawStatus || '').toLowerCase()] || 'Normal',
       }
     }
     // Imaging style: { finding, severity, region, location }
@@ -50,54 +66,6 @@ function dotsByRiskLevel(riskLevel) {
   return ['bg-slate-200 dark:bg-[#252530]', 'bg-slate-200 dark:bg-[#252530]', 'bg-slate-200 dark:bg-[#252530]']
 }
 
-function symbolForResult(icon) {
-  if (icon === 'heart') return 'HT'
-  if (icon === 'eye') return 'OPH'
-  if (icon === 'skin') return 'DERM'
-  if (icon === 'lungs') return 'PULM'
-  if (icon === 'droplet') return 'NEPH'
-  return 'RAD'
-}
-
-function themeClasses(theme) {
-  const styles = {
-    teal: 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900/50 dark:bg-teal-950/50 dark:text-teal-300',
-    rose: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/50 dark:text-rose-300',
-    violet: 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/50 dark:text-violet-300',
-    pink: 'border-pink-200 bg-pink-50 text-pink-700 dark:border-pink-900/50 dark:bg-pink-950/50 dark:text-pink-300',
-    cyan: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-950/50 dark:text-cyan-300',
-    amber: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/50 dark:text-amber-300',
-  }
-
-  return styles[theme] || styles.teal
-}
-
-/** Format a PATIENT_FRIENDLY_RESULTS item (imaging/signal) as a selectedLab object for LabDetailView. */
-function mapImagingToSelectedLab(imaging) {
-  let normalizedSeverity = 'Normal'
-  if (imaging.riskLevel === 'medium') normalizedSeverity = 'Watch'
-  else if (imaging.riskLevel === 'high') normalizedSeverity = 'High'
-  return {
-    id: imaging.id,
-    name: imaging.title,
-    status: 'New',
-    doctor: 'AI Analysis',
-    date: `Received ${imaging.date}`,
-    explanation: imaging.details,
-    aiSummary: imaging.summary,
-    ai_draft_text: imaging.summary,
-    published_text: imaging.summary,
-    flags: imaging.riskLevel === 'low' ? 0 : 1,
-    details: imaging.findings.map((f) => ({
-      test: f,
-      yourValue: normalizedSeverity,
-      normalRange: '-',
-      status: normalizedSeverity,
-    })),
-    patient_id: null,
-  }
-}
-
 function FlaskConicalIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -106,6 +74,22 @@ function FlaskConicalIcon() {
       <path d="M8.5 13h7" />
     </svg>
   )
+}
+
+function isImagingOrSignalName(value) {
+  const name = String(value || '').toLowerCase()
+  return [
+    /\bx-?ray\b/,
+    /\bcxr\b/,
+    /\bct\b/,
+    /\bmri\b/,
+    /\bultrasound\b/,
+    /\busg\b/,
+    /\becg\b/,
+    /\bekg\b/,
+    /\belectrocardiogram\b/,
+    /\bscan\b/,
+  ].some((pattern) => pattern.test(name))
 }
 
 /** Map a single API lab result + order into the view's lab shape. */
@@ -121,6 +105,7 @@ function mapApiResultToLab(apiRes, ordersMap, patientId) {
   const abnormalCount = details.filter(d => d.status !== 'Normal').length
   const rawSummaryText = apiRes.published_text || apiRes.ai_draft_text || 'Results are ready for review.'
   const summaryText = stripAiWarning(rawSummaryText)
+  const previewText = aiDraftPreview(summaryText) || 'Results are ready for review.'
   const label = testName
     || (apiRes.file_type && apiRes.file_type !== 'manual' ? `Lab Result (${apiRes.file_type.toUpperCase()})` : null)
     || 'Lab Result'
@@ -132,11 +117,12 @@ function mapApiResultToLab(apiRes, ordersMap, patientId) {
     status: apiRes.status === 'PUBLISHED' ? 'Reviewed' : 'New',
     doctor: 'Your Doctor',
     date: `Received ${formatRelativeTime(apiRes.created_at || new Date())}`,
-    aiSummary: summaryText,
+    aiSummary: previewText,
     flags: abnormalCount,
-    explanation: summaryText,
+    explanation: normalizeAiDraftForDisplay(summaryText),
     ai_draft_text: apiRes.ai_draft_text,
     published_text: apiRes.published_text,
+    ai_confidence: apiRes.ai_confidence,
     ai_visual_findings: apiRes.ai_visual_findings,
     published_findings: apiRes.published_findings,
     fileUrl: apiRes.file_url,
@@ -144,11 +130,10 @@ function mapApiResultToLab(apiRes, ordersMap, patientId) {
   }
 }
 
-export default function LabResultsView({ setCurrentView, setSelectedLab, setSelectedLab: _passedSetSelectedLab, labOrders, currentUser }) {
+export default function LabResultsView({ setCurrentView, setSelectedLab, labOrders, currentUser }) {
   const [resultType, setResultType] = useState('blood')
   const [filter, setFilter] = useState('all')
   const [imagingFilter, setImagingFilter] = useState('all')
-  const [selectedImagingId, setSelectedImagingId] = useState(null)
   const [readyNotifiedOrderIds, setReadyNotifiedOrderIds] = useState([])
   const [toastMessage, setToastMessage] = useState('')
   const [fetchedResults, setFetchedResults] = useState([])
@@ -253,10 +238,17 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
     return scopedResults
   }, [allBloodResults, filter])
 
-  const selectedImaging = useMemo(
-    () => PATIENT_FRIENDLY_RESULTS.find((item) => item.id === selectedImagingId) || null,
-    [selectedImagingId],
-  )
+  const imagingResults = useMemo(() => {
+    const scoped = allBloodResults.filter((result) => isImagingOrSignalName(result.name))
+    if (imagingFilter === 'all') return scoped
+    return scoped.filter((result) => {
+      const abnormal = Number(result.flags || 0) > 0
+      if (imagingFilter === 'low') return !abnormal
+      if (imagingFilter === 'medium') return abnormal
+      if (imagingFilter === 'high') return false
+      return true
+    })
+  }, [allBloodResults, imagingFilter])
 
   useEffect(() => {
     const unseenReadyOrder = readyOrders.find((order) => !readyNotifiedOrderIds.includes(order.id))
@@ -343,7 +335,7 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
               <button
                 key={key}
                 type="button"
-                onClick={() => { setResultType(key); setSelectedImagingId(null); setImagingFilter('all') }}
+                onClick={() => { setResultType(key); setImagingFilter('all') }}
                 className={`rounded-lg px-4 py-2 text-sm font-semibold transition-all ${active ? 'bg-slate-900 text-white dark:bg-[#eeeef5] dark:text-[#0c0c13]' : 'text-slate-500 hover:text-slate-700 dark:text-[#70708a] dark:hover:text-[#c8c8e0]'}`}
               >
                 {label}
@@ -382,7 +374,7 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
         )}
 
         {/* Risk filter — imaging */}
-        {resultType === 'imaging' && !selectedImaging && (
+        {resultType === 'imaging' && (
           <div className="flex items-center gap-2" role="tablist" aria-label="Filter imaging results">
             {[
               ['all', 'All'],
@@ -531,114 +523,41 @@ const allBloodResults = useMemo(() => ([...fetchedResults, ...dynamicReadyResult
         </div>
       )}
 
-      {resultType === 'imaging' && !selectedImaging && (
+      {resultType === 'imaging' && (
         <div className="space-y-3">
-          {PATIENT_FRIENDLY_RESULTS.filter((r) => imagingFilter === 'all' || r.riskLevel === imagingFilter).map((result) => {
-            const symbol = symbolForResult(result.icon)
-            return (
+          {imagingResults.length === 0 && (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white py-16 dark:border-[#252530] dark:bg-[#111118]">
+              <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400 dark:bg-[#1c1c25] dark:text-[#505060]"><FlaskConicalIcon /></span>
+              <p className="mt-3 text-sm font-medium text-slate-500 dark:text-[#70708a]">No imaging or signal results yet</p>
+              <p className="mt-1 text-xs text-slate-400 dark:text-[#606070]">Results will appear here when your doctor publishes them.</p>
+            </div>
+          )}
+
+          {imagingResults.map((result) => (
               <button
                 key={result.id}
                 type="button"
                 onClick={() => {
-                  if (_passedSetSelectedLab) {
-                    _passedSetSelectedLab(mapImagingToSelectedLab(result))
-                    setCurrentView('lab-detail')
-                  } else {
-                    setSelectedImagingId(result.id)
-                  }
+                  setSelectedLab(result)
+                  setCurrentView('lab-detail')
                 }}
                 className="card-hover w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-200 hover:border-slate-300 dark:border-[#252530] dark:bg-[#111118] dark:shadow-none dark:hover:border-[#353545] dark:hover:bg-[#16161e]"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex min-w-0 items-start gap-3">
-                    <span className={`inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border ${themeClasses(result.theme)}`}>
-                      <span className="text-[10px] font-bold tracking-tight">{symbol}</span>
+                    <span className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-900/50 dark:bg-indigo-950/50 dark:text-indigo-300">
+                      <span className="text-[10px] font-bold tracking-tight">IMG</span>
                     </span>
                     <div className="min-w-0">
-                      <h2 className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">{result.title}</h2>
+                      <h2 className="text-sm font-semibold text-slate-900 dark:text-[#eeeef5]">{result.name}</h2>
                       <p className="mt-0.5 text-xs text-slate-400 dark:text-[#606070]">{result.date}</p>
-                      <p className="mt-2 text-sm text-slate-600 dark:text-[#9898b0]">{result.summary}</p>
+                      <p className="mt-2 text-sm text-slate-600 dark:text-[#9898b0]">{result.aiSummary}</p>
                     </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-2">
-                    <AiRiskBadge riskLevel={result.riskLevel} confidence={result.confidence} compact />
-                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${themeClasses(result.theme)}`}>
-                      {result.aiLabel}
-                    </span>
                   </div>
                 </div>
               </button>
-            )
-          })}
+          ))}
         </div>
-      )}
-
-      {resultType === 'imaging' && selectedImaging && (
-        <article className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-[#252530] dark:bg-[#111118] dark:shadow-none">
-          <button
-            type="button"
-            onClick={() => setSelectedImagingId(null)}
-            className="mb-4 text-xs font-semibold text-slate-500 transition-colors hover:text-slate-700 dark:text-[#70708a] dark:hover:text-[#c8c8e0]"
-          >
-            ← Back to all results
-          </button>
-
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-[#eeeef5]">{selectedImaging.title}</h2>
-              <p className="mt-1 text-xs text-slate-400 dark:text-[#606070]">{selectedImaging.date} · Model: {selectedImaging.model}</p>
-            </div>
-            <AiRiskBadge riskLevel={selectedImaging.riskLevel} confidence={selectedImaging.confidence} />
-          </div>
-
-          <section className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-[#252530] dark:bg-[#1c1c25]">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-[#70708a]">Simple Summary</p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-700 dark:text-[#c8c8e0]">{selectedImaging.summary}</p>
-          </section>
-
-          <section className="mt-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-[#252530] dark:bg-[#14141b]">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-[#70708a]">What This Means</p>
-            <p className="mt-2 text-sm leading-relaxed text-slate-600 dark:text-[#9898b0]">{selectedImaging.details}</p>
-          </section>
-
-          <section className="mt-3 rounded-xl border border-slate-200 bg-white p-4 dark:border-[#252530] dark:bg-[#14141b]">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-[#70708a]">Key Findings</p>
-            <ul className="mt-2 space-y-2">
-              {selectedImaging.findings.map((finding) => (
-                <li key={finding} className="flex items-start gap-2 text-sm text-slate-600 dark:text-[#9898b0]">
-                  <span className="mt-0.5 text-emerald-500 dark:text-emerald-400">•</span>
-                  <span>{finding}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/40 dark:bg-amber-950/30">
-            <div className="flex items-start gap-2 text-amber-800 dark:text-amber-300">
-              <span className="mt-0.5 text-sm font-bold">!</span>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em]">Suggested Next Step</p>
-                <p className="mt-1 text-sm leading-relaxed">{selectedImaging.recommendation}</p>
-              </div>
-            </div>
-          </section>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (_passedSetSelectedLab) {
-                _passedSetSelectedLab(mapImagingToSelectedLab(selectedImaging))
-                setCurrentView('lab-detail')
-              } else {
-                setCurrentView('symptom-checker')
-              }
-            }}
-            className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-500"
-          >
-            <span>Discuss with AI Assistant →</span>
-          </button>
-        </article>
       )}
 
       {toastMessage && (

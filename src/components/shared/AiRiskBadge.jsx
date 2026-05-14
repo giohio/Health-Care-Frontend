@@ -19,7 +19,8 @@ SparklesIcon.defaultProps = {
 }
 
 export default function AiRiskBadge({ riskLevel, confidence, compact }) {
-  const safeConfidence = Math.max(0, Math.min(100, confidence))
+  const hasConfidence = Number.isFinite(confidence)
+  const safeConfidence = hasConfidence ? Math.max(0, Math.min(100, confidence)) : null
   const riskConfig = getRiskConfig(riskLevel)
 
   if (compact) {
@@ -27,8 +28,12 @@ export default function AiRiskBadge({ riskLevel, confidence, compact }) {
       <div className={`flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[11px] font-semibold ${riskConfig.bg} ${riskConfig.border} ${riskConfig.text}`}>
         <SparklesIcon className="h-3 w-3" />
         <span>{riskConfig.label}</span>
-        <span className="opacity-30">·</span>
-        <span>{safeConfidence}%</span>
+        {hasConfidence && (
+          <>
+            <span className="opacity-30">·</span>
+            <span>{safeConfidence}%</span>
+          </>
+        )}
       </div>
     )
   }
@@ -45,11 +50,11 @@ export default function AiRiskBadge({ riskLevel, confidence, compact }) {
 
       <div className="flex items-center gap-3">
         <div className="flex flex-col items-end gap-1">
-          <p className={`text-[11px] ${riskConfig.text}`}>{safeConfidence}% confidence</p>
+          <p className={`text-[11px] ${riskConfig.text}`}>{hasConfidence ? `${safeConfidence}% confidence` : 'Confidence unavailable'}</p>
           <div className="h-1.5 w-24 rounded-full bg-white/40 dark:bg-black/20">
             <div
               className="h-full rounded-full transition-all duration-700 ease-out"
-              style={{ width: `${safeConfidence}%`, background: riskConfig.barColor }}
+              style={{ width: `${safeConfidence ?? 0}%`, background: riskConfig.barColor }}
             />
           </div>
         </div>
@@ -60,10 +65,11 @@ export default function AiRiskBadge({ riskLevel, confidence, compact }) {
 
 AiRiskBadge.propTypes = {
   riskLevel: PropTypes.oneOf(['high', 'moderate', 'low']).isRequired,
-  confidence: PropTypes.number.isRequired,
+  confidence: PropTypes.number,
   compact: PropTypes.bool,
 }
 
 AiRiskBadge.defaultProps = {
+  confidence: null,
   compact: false,
 }

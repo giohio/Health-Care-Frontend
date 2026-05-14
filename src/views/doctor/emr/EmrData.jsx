@@ -136,6 +136,22 @@ export const LAB_TESTS = [
     aiEnabled: true,
     testType: TEST_TYPE.IMAGING,
   },
+  {
+    id: 'lung_sounds',
+    name: 'Lung Sound Recording',
+    desc: 'Respiratory auscultation audio for AI-assisted review',
+    tat: 'Immediate after upload',
+    aiEnabled: true,
+    testType: TEST_TYPE.OTHER,
+  },
+  {
+    id: 'heart_sounds',
+    name: 'Heart Sound Recording',
+    desc: 'Cardiac auscultation audio for AI-assisted review',
+    tat: 'Immediate after upload',
+    aiEnabled: true,
+    testType: TEST_TYPE.OTHER,
+  },
 ]
 
 export const LAB_TEST_GROUPS = [
@@ -158,6 +174,7 @@ export const LAB_TEST_GROUPS = [
       'ultrasound_abdomen',
     ],
   },
+  { key: 'auscultation', label: 'Heart & Lung Auscultation', color: 'cyan', testIds: ['lung_sounds', 'heart_sounds'] },
 ]
 
 export const ICD_DATABASE = [
@@ -215,4 +232,6 @@ export const DEFAULT_LAB_PRICES = {
   ct_brain: 900000,
   mri_brain: 1500000,
   ultrasound_abdomen: 350000,
+  lung_sounds: 180000,
+  heart_sounds: 220000,
 }

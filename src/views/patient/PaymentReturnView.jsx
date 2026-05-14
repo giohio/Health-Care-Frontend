@@ -64,12 +64,23 @@ const RESULT_MAP = {
   },
 }
 
-export default function PaymentReturnView({ status, onViewAppointments, onRetry }) {
+const LAB_PAYMENT_TYPES = new Set(['LAB_ORDER', 'LAB_ORDER_BUNDLE'])
+
+export default function PaymentReturnView({ status, paymentType, onViewAppointments, onViewPayments, onRetry }) {
   const result = RESULT_MAP[status] ?? RESULT_MAP.pending
+  const isLabPayment = LAB_PAYMENT_TYPES.has(paymentType)
   const Icon = result.icon
   let statusBadgeLabel = 'Processing'
   if (status === 'success') statusBadgeLabel = 'Payment Completed'
   if (status === 'failed') statusBadgeLabel = 'Payment Failed'
+  const viewPayments = onViewPayments || onViewAppointments
+  const primaryLabel = isLabPayment ? 'View Payments' : result.primaryLabel
+  const primaryAction = isLabPayment ? viewPayments : onViewAppointments
+  const message = isLabPayment && status === 'success'
+    ? 'Your lab payment has been received. You can review it in your payment history.'
+    : isLabPayment && status === 'pending'
+      ? "Your lab payment is being processed. We'll update your payment history once it's confirmed."
+      : result.message
 
   return (
     <div className="mx-auto max-w-xl px-2 sm:px-0">
@@ -86,25 +97,25 @@ export default function PaymentReturnView({ status, onViewAppointments, onRetry 
               {statusBadgeLabel}
             </span>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-[#eeeef5]">{result.title}</h1>
-            <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-600 dark:text-[#a4a4bb]">{result.message}</p>
+            <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-600 dark:text-[#a4a4bb]">{message}</p>
           </div>
 
           <div className="mt-1 flex w-full flex-col gap-2">
             <button
               type="button"
-              onClick={result.primaryAction === 'onRetry' ? onRetry : onViewAppointments}
+              onClick={!isLabPayment && result.primaryAction === 'onRetry' ? onRetry : primaryAction}
               className="w-full rounded-xl bg-indigo-600 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-px hover:bg-indigo-700 hover:shadow-[0_8px_20px_rgba(79,70,229,0.35)] active:scale-[0.99] dark:bg-indigo-600 dark:hover:bg-indigo-500"
             >
-              {result.primaryLabel}
+              {primaryLabel}
             </button>
 
             {status === 'failed' && (
               <button
                 type="button"
-                onClick={onViewAppointments}
+                onClick={isLabPayment ? viewPayments : onViewAppointments}
                 className="w-full rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 hover:bg-white/60 transition-all duration-150 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-black/20"
               >
-                View Appointments
+                {isLabPayment ? 'View Payments' : 'View Appointments'}
               </button>
             )}
           </div>
@@ -116,10 +127,14 @@ export default function PaymentReturnView({ status, onViewAppointments, onRetry 
 
 PaymentReturnView.propTypes = {
   status: PropTypes.oneOf(['success', 'failed', 'pending']),
+  paymentType: PropTypes.string,
   onViewAppointments: PropTypes.func.isRequired,
+  onViewPayments: PropTypes.func,
   onRetry: PropTypes.func.isRequired,
 }
 
 PaymentReturnView.defaultProps = {
   status: 'pending',
+  paymentType: '',
+  onViewPayments: undefined,
 }

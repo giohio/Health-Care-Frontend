@@ -250,6 +250,15 @@ function formatTatFromMinutes(minutes) {
   return `${hours}h`
 }
 
+function normalizeTestName(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function isActiveLabOrder(order) {
+  const status = String(order?.status || '').toUpperCase()
+  return !['CANCELLED', 'CANCELED', 'DELETED'].includes(status)
+}
+
 function resolveResultKey(testIds) {
   if (testIds.includes('cbc')) return 'full-blood-panel'
   if (testIds.includes('lipid')) return 'lipid-profile'
@@ -1018,6 +1027,25 @@ export default function EMRWorkspaceView({
   }, [])
 
   const severeAllergies = patient.allergies.filter((item) => item.severity.toLowerCase().includes('severe'))
+  const alreadyOrderedTestNames = useMemo(() => {
+    const names = new Set()
+    labOrders.forEach((order) => {
+      if (!isActiveLabOrder(order)) return
+      if (apptId && String(order.appointment_id || '') !== String(apptId)) return
+      if (order.test_name) names.add(normalizeTestName(order.test_name))
+      if (Array.isArray(order.tests)) {
+        order.tests.forEach((name) => names.add(normalizeTestName(name)))
+      }
+    })
+    return names
+  }, [apptId, labOrders])
+  const alreadyOrderedTestIds = useMemo(
+    () => LAB_TESTS
+      .filter((test) => alreadyOrderedTestNames.has(normalizeTestName(test.name)))
+      .map((test) => test.id),
+    [alreadyOrderedTestNames],
+  )
+  const alreadyOrderedTestIdSet = useMemo(() => new Set(alreadyOrderedTestIds), [alreadyOrderedTestIds])
   const selectedTests = LAB_TESTS.filter((test) => orderedTests.includes(test.id))
   const selectedMaxTatMinutes = selectedTests.length > 0
     ? Math.max(...selectedTests.map((test) => parseTatMinutes(test.tat)))
@@ -1202,6 +1230,7 @@ export default function EMRWorkspaceView({
   }
 
   const toggleTest = (testId) => {
+    if (alreadyOrderedTestIdSet.has(testId)) return
     setOrderedTests((prev) => (
       prev.includes(testId)
         ? prev.filter((id) => id !== testId)
@@ -2727,26 +2756,39 @@ export default function EMRWorkspaceView({
                             <div className="divide-y divide-slate-100 dark:divide-[#1c1c25]">
                               {groupTests.map((test) => {
                                 const selected = orderedTests.includes(test.id)
+                                const alreadyOrdered = alreadyOrderedTestIdSet.has(test.id)
                                 return (
                                   <button
                                     key={test.id}
                                     type="button"
-                                    onClick={() => toggleTest(test.id)}
-                                    className={`w-full px-4 py-3 text-left transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-[#16161e] ${selected ? 'bg-indigo-50/50 dark:bg-indigo-950/20' : ''}`}
+                                    onClick={() => !alreadyOrdered && toggleTest(test.id)}
+                                    disabled={alreadyOrdered}
+                                    className={`w-full px-4 py-3 text-left transition-colors duration-150 ${
+                                      selected
+                                        ? 'bg-indigo-50/50 dark:bg-indigo-950/20'
+                                        : alreadyOrdered
+                                          ? 'cursor-not-allowed bg-slate-50/70 opacity-60 dark:bg-[#15151d]'
+                                          : 'hover:bg-slate-50 dark:hover:bg-[#16161e]'
+                                    }`}
                                   >
                                     <span className="flex items-start gap-3">
                                       <span
-                                        className={`mt-0.5 inline-flex flex-shrink-0 items-center justify-center rounded transition-all duration-150 ${selected ? 'border border-indigo-600 bg-indigo-600 text-white' : 'border-2 border-slate-300 dark:border-[#404050]'}`}
+                                        className={`mt-0.5 inline-flex flex-shrink-0 items-center justify-center rounded transition-all duration-150 ${selected ? 'border border-indigo-600 bg-indigo-600 text-white' : alreadyOrdered ? 'border border-slate-300 bg-slate-100 text-slate-400 dark:border-[#353545] dark:bg-[#20202a]' : 'border-2 border-slate-300 dark:border-[#404050]'}`}
                                         style={{ minWidth: '1.125rem', minHeight: '1.125rem', width: '1.125rem', height: '1.125rem' }}
                                       >
                                         {selected && <span className="inline-flex h-2.5 w-2.5"><CheckIcon /></span>}
                                       </span>
                                       <span className="min-w-0 flex-1">
-                                        <span className={`block text-sm font-semibold leading-snug ${selected ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-900 dark:text-[#eeeef5]'}`}>
+                                        <span className={`block text-sm font-semibold leading-snug ${selected ? 'text-indigo-700 dark:text-indigo-300' : alreadyOrdered ? 'text-slate-400 dark:text-[#606070]' : 'text-slate-900 dark:text-[#eeeef5]'}`}>
                                           {test.name}
                                         </span>
                                         <span className="mt-0.5 block text-xs text-slate-500 dark:text-[#70708a]">{test.desc}</span>
                                         <span className="mt-1.5 flex flex-wrap items-center gap-2">
+                                          {alreadyOrdered && (
+                                            <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:bg-[#20202a] dark:text-[#70708a]">
+                                              Ordered
+                                            </span>
+                                          )}
                                           <span className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-[#1c1c25] dark:text-[#70708a]">
                                             <span className="inline-flex h-2.5 w-2.5"><IconClock /></span>
                                             {test.tat}

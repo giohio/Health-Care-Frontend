@@ -107,6 +107,15 @@ function normalizeNoteType(template) {
   return 'progress'
 }
 
+function normalizeTestName(value) {
+  return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ')
+}
+
+function isActiveLabOrder(order) {
+  const status = String(order?.status || '').toUpperCase()
+  return !['CANCELLED', 'CANCELED', 'DELETED'].includes(status)
+}
+
 export default function EMRWorkspace({
   navigateTo,
   user,
@@ -177,6 +186,25 @@ export default function EMRWorkspace({
   const apptId = patient.appointment_id ?? (explicitPatientId && patient.id !== explicitPatientId ? patient.id : null)
 
   const severeAllergies = patient.allergies.filter((item) => item.severity?.toLowerCase().includes('severe'))
+  const alreadyOrderedTestNames = useMemo(() => {
+    const names = new Set()
+    labOrders.forEach((order) => {
+      if (!isActiveLabOrder(order)) return
+      if (apptId && String(order.appointment_id || '') !== String(apptId)) return
+      if (order.test_name) names.add(normalizeTestName(order.test_name))
+      if (Array.isArray(order.tests)) {
+        order.tests.forEach((name) => names.add(normalizeTestName(name)))
+      }
+    })
+    return names
+  }, [apptId, labOrders])
+  const alreadyOrderedTestIds = useMemo(
+    () => LAB_TESTS
+      .filter((test) => alreadyOrderedTestNames.has(normalizeTestName(test.name)))
+      .map((test) => test.id),
+    [alreadyOrderedTestNames],
+  )
+  const alreadyOrderedTestIdSet = useMemo(() => new Set(alreadyOrderedTestIds), [alreadyOrderedTestIds])
 
   const fetchVitals = useCallback(() => {
     const fallback = normalizeVitals(patient.vitals_latest || patient.vital_signs || patient.profile?.vital_signs)
@@ -381,7 +409,7 @@ export default function EMRWorkspace({
   }
 
   const applySuggestedTests = (testNames) => {
-    const idsToAdd = resolveSuggestedTestIds(testNames, LAB_TESTS, orderedTests)
+    const idsToAdd = resolveSuggestedTestIds(testNames, LAB_TESTS, [...orderedTests, ...alreadyOrderedTestIds])
     if (idsToAdd.length > 0) {
       setOrderedTests((prev) => [...prev, ...idsToAdd])
       setOrderStep('tests')
@@ -463,6 +491,7 @@ export default function EMRWorkspace({
   }
 
   const toggleTest = (id) => {
+    if (alreadyOrderedTestIdSet.has(id)) return
     setOrderedTests(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
@@ -632,6 +661,7 @@ export default function EMRWorkspace({
           setResultsSubTab={setResultsSubTab}
           apptId={apptId}
           patientName={patient.name}
+          user={user}
           historyRefreshKey={historyRefreshKey}
           onLabResultUpdate={fetchLabData}
           orderStep={orderStep}
@@ -641,6 +671,7 @@ export default function EMRWorkspace({
           orderNote={orderNote}
           setOrderNote={setOrderNote}
           orderedTests={orderedTests}
+          alreadyOrderedTestIds={alreadyOrderedTestIds}
           toggleTest={toggleTest}
           customTests={customTests}
           addCustomTest={() => {}}

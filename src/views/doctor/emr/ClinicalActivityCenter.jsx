@@ -4,8 +4,11 @@ import PropTypes from 'prop-types'
 import { FlaskConicalIcon, ActivityIcon, SparkleIcon, ClipboardListIcon, ClockIcon, SparklesIcon, CheckIcon } from './EmrIcons'
 import MedicalHistoryTab from '../../../components/emr/MedicalHistoryTab'
 import TreatmentPlanPanel from '../../../components/emr/TreatmentPlanPanel'
+import CardiologyPanel from '../../../components/emr/CardiologyPanel'
+import PulmonologyPanel from '../../../components/emr/PulmonologyPanel'
 import { emrApi } from '../../../api/emr'
 import { normalizeStatus } from '../../../components/emr/labResultUtils'
+import { PATIENT_SPECIALTY_RESULTS } from '../../../data/specialtyResults'
 import {
   UploadModal,
   VerifyModal,
@@ -25,6 +28,7 @@ export default function ClinicalActivityCenter({
   apptId,
   patientName,
   selectedPatient,
+  user,
   historyRefreshKey,
   onLabResultUpdate,
   onNotify,
@@ -36,6 +40,7 @@ export default function ClinicalActivityCenter({
   orderNote,
   setOrderNote,
   orderedTests,
+  alreadyOrderedTestIds = [],
   toggleTest,
   handleSubmitOrder,
   hasOrderSelection,
@@ -55,9 +60,31 @@ export default function ClinicalActivityCenter({
   const [uploadModal, setUploadModal] = useState(null)   // order object
   const [holisticOpen, setHolisticOpen] = useState(false)
   const [verifyingId, setVerifyingId] = useState(null)
-  const [retryingId, setRetryingId] = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null) // order to confirm-delete
   const [deletingId, setDeletingId] = useState(null)
+  const [printSlipOpen, setPrintSlipOpen] = useState(false)
+  const [printSlipTestIds, setPrintSlipTestIds] = useState([])
+  const [auscultationTab, setAuscultationTab] = useState('lung')
+
+  function formatSlipDate(value) {
+    if (!value) return ''
+    const date = value instanceof Date ? value : new Date(value)
+    if (Number.isNaN(date.getTime())) return ''
+    return date.toLocaleString('vi-VN')
+  }
+
+  function slipVisitDate() {
+    return formatSlipDate(
+      selectedPatient?.start_time
+      || selectedPatient?.appointment_date
+      || selectedPatient?.date
+      || selectedPatient?.scheduled_at
+    ) || ''
+  }
+
+  function slipDoctorName() {
+    return selectedPatient?.doctor_name || selectedPatient?.doctorName || selectedPatient?.clinician_name || 'Doctor'
+  }
 
   // ─── handlers ────────────────────────────────────────────────────────────
   async function handleVerify({ interpretation, doctorNotes }) {
@@ -73,24 +100,221 @@ export default function ClinicalActivityCenter({
     onLabResultUpdate?.()
   }
 
-  async function handleRetryAi(result) {
-    setRetryingId(result.id)
-    try {
-      await emrApi.retryLabResultAi(result.id)
-      onLabResultUpdate?.()
-    } catch (err) {
-      const msg = err?.message || ''
-      if (msg.includes('not in a retryable state')) {
-        alert('Backend service cần được restart để kích hoạt tính năng retry cho manual entries. Vui lòng restart EMR Result Service.')
-      }
-    } finally {
-      setRetryingId(null)
-    }
-  }
-
   function handleUploadSuccess() {
     setUploadModal(null)
     onLabResultUpdate?.()
+  }
+
+  function openPrintSlip() {
+    setPrintSlipTestIds(orderedTests)
+    setPrintSlipOpen(true)
+  }
+
+  function togglePrintSlipTest(testId) {
+    setPrintSlipTestIds((prev) => (
+      prev.includes(testId)
+        ? prev.filter((id) => id !== testId)
+        : [...prev, testId]
+    ))
+  }
+
+  function handlePrintSlips(testIds = printSlipTestIds) {
+    const testsToPrint = testIds
+      .map((testId) => LAB_TESTS.find((test) => test.id === testId))
+      .filter(Boolean)
+    if (testsToPrint.length === 0) return
+
+    const escapeHtml = (value) => String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+
+    const patientLabel = patientName || selectedPatient?.name || selectedPatient?.patient_name || 'Patient'
+    const visitDate = slipVisitDate()
+    const doctorName = slipDoctorName()
+    const createdAt = new Date().toLocaleString('vi-VN')
+    const testRows = testsToPrint.map((test, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(test.name)}</strong><br><span>${escapeHtml(test.desc || '')}</span></td>
+        <td>${escapeHtml(test.testType || '')}</td>
+        <td>${escapeHtml(test.tat || '')}</td>
+      </tr>
+    `).join('')
+
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Lab Order Slip</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+            .header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #111827; padding-bottom: 14px; }
+            .title { font-size: 22px; font-weight: 800; letter-spacing: .02em; margin: 0; }
+            .subtitle { font-size: 12px; color: #6b7280; margin-top: 4px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 18px; font-size: 13px; }
+            .label { color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+            .value { min-height: 20px; font-weight: 600; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 13px; }
+            th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; vertical-align: top; }
+            th { background: #f3f4f6; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #4b5563; }
+            td span { color: #6b7280; font-size: 12px; }
+            .blank { min-height: 38px; border: 1px dashed #9ca3af; margin-top: 6px; padding: 8px; }
+            .footer { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 36px; font-size: 12px; }
+            .signature { border-top: 1px solid #9ca3af; padding-top: 8px; text-align: center; margin-top: 56px; }
+            @media print { body { margin: 18mm; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1 class="title">LAB ORDER SLIP</h1>
+              <div class="subtitle">For patient guidance and lab intake reference</div>
+            </div>
+            <div style="text-align:right">
+              <div class="label">Printed at</div>
+              <div>${escapeHtml(createdAt)}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div><div class="label">Patient</div><div class="value">${escapeHtml(patientLabel)}</div></div>
+            <div><div class="label">Visit date</div><div class="value">${escapeHtml(visitDate)}</div></div>
+            <div><div class="label">Order priority</div><div class="value">${escapeHtml(String(orderPriority || 'routine').toUpperCase())}</div></div>
+            <div><div class="label">Requested by</div><div class="value">${escapeHtml(doctorName)}</div></div>
+            <div><div class="label">Destination / Room</div><div class="value">&nbsp;</div></div>
+          </div>
+          <table>
+            <thead>
+              <tr><th style="width:48px">#</th><th>Test</th><th style="width:140px">Type</th><th style="width:120px">Est. TAT</th></tr>
+            </thead>
+            <tbody>${testRows}</tbody>
+          </table>
+          <div style="margin-top:20px">
+            <div class="label">Clinical note / instructions</div>
+            <div class="blank">${escapeHtml(orderNote || '')}</div>
+          </div>
+          <div style="margin-top:16px">
+            <div class="label">Lab location / additional directions</div>
+            <div class="blank">&nbsp;</div>
+          </div>
+          <div class="footer">
+            <div class="signature">Ordering doctor</div>
+            <div class="signature">Lab staff</div>
+          </div>
+          <button class="no-print" onclick="window.print()" style="margin-top:24px;padding:10px 16px;font-weight:700">Print</button>
+          <script>window.onload = () => window.print()</script>
+        </body>
+      </html>`
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) return
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
+  }
+
+  function printExistingOrders(orders) {
+    const printableOrders = orders.filter(Boolean)
+    if (printableOrders.length === 0) return
+
+    const pseudoTests = printableOrders.map((order) => ({
+      id: order.id,
+      name: order.test_name || 'Lab Order',
+      desc: order.instructions || '',
+      testType: order.test_type || '',
+      tat: '',
+    }))
+
+    const previousOrderPriority = orderPriority
+    const escapeHtml = (value) => String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;')
+
+    const patientLabel = patientName || selectedPatient?.name || selectedPatient?.patient_name || 'Patient'
+    const visitDate = slipVisitDate()
+    const doctorName = slipDoctorName()
+    const createdAt = new Date().toLocaleString('vi-VN')
+    const testRows = pseudoTests.map((test, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td><strong>${escapeHtml(test.name)}</strong><br><span>${escapeHtml(test.desc || '')}</span></td>
+        <td>${escapeHtml(test.testType || '')}</td>
+        <td>${escapeHtml(test.tat || '')}</td>
+      </tr>
+    `).join('')
+
+    const html = `<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Lab Order Slip</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+            .header { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #111827; padding-bottom: 14px; }
+            .title { font-size: 22px; font-weight: 800; letter-spacing: .02em; margin: 0; }
+            .subtitle { font-size: 12px; color: #6b7280; margin-top: 4px; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; margin-top: 18px; font-size: 13px; }
+            .label { color: #6b7280; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 3px; }
+            .value { min-height: 20px; font-weight: 600; border-bottom: 1px solid #d1d5db; padding-bottom: 4px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 24px; font-size: 13px; }
+            th, td { border: 1px solid #d1d5db; padding: 10px; text-align: left; vertical-align: top; }
+            th { background: #f3f4f6; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #4b5563; }
+            td span { color: #6b7280; font-size: 12px; }
+            .blank { min-height: 38px; border: 1px dashed #9ca3af; margin-top: 6px; padding: 8px; }
+            .footer { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 36px; font-size: 12px; }
+            .signature { border-top: 1px solid #9ca3af; padding-top: 8px; text-align: center; margin-top: 56px; }
+            @media print { body { margin: 18mm; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div>
+              <h1 class="title">LAB ORDER SLIP</h1>
+              <div class="subtitle">For patient guidance and lab intake reference</div>
+            </div>
+            <div style="text-align:right">
+              <div class="label">Printed at</div>
+              <div>${escapeHtml(createdAt)}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div><div class="label">Patient</div><div class="value">${escapeHtml(patientLabel)}</div></div>
+            <div><div class="label">Visit date</div><div class="value">${escapeHtml(visitDate)}</div></div>
+            <div><div class="label">Order priority</div><div class="value">${escapeHtml(String(previousOrderPriority || 'routine').toUpperCase())}</div></div>
+            <div><div class="label">Requested by</div><div class="value">${escapeHtml(doctorName)}</div></div>
+            <div><div class="label">Destination / Room</div><div class="value">&nbsp;</div></div>
+          </div>
+          <table>
+            <thead>
+              <tr><th style="width:48px">#</th><th>Test</th><th style="width:140px">Type</th><th style="width:120px">Est. TAT</th></tr>
+            </thead>
+            <tbody>${testRows}</tbody>
+          </table>
+          <div style="margin-top:16px">
+            <div class="label">Lab location / additional directions</div>
+            <div class="blank">&nbsp;</div>
+          </div>
+          <div class="footer">
+            <div class="signature">Ordering doctor</div>
+            <div class="signature">Lab staff</div>
+          </div>
+          <button class="no-print" onclick="window.print()" style="margin-top:24px;padding:10px 16px;font-weight:700">Print</button>
+          <script>window.onload = () => window.print()</script>
+        </body>
+      </html>`
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (!printWindow) return
+    printWindow.document.open()
+    printWindow.document.write(html)
+    printWindow.document.close()
   }
 
   async function handleDeleteOrder(order) {
@@ -121,6 +345,26 @@ export default function ClinicalActivityCenter({
           .map((item) => (typeof item === 'string' ? item : item?.test_name))
           .filter(Boolean)
       : []
+  const alreadyOrderedTestIdSet = new Set(alreadyOrderedTestIds)
+  const resultOrderIds = new Set(labResults.map((r) => r.order_id))
+  const awaitingUploadOrders = labOrders.filter((order) => !resultOrderIds.has(order.id))
+  const resultFilterTabs = [
+    { key: 'ALL', label: 'All', count: labResults.length + awaitingUploadOrders.length },
+    { key: 'AWAITING_UPLOAD', label: 'Awaiting Upload', count: awaitingUploadOrders.length },
+    { key: 'PUBLISHED', label: 'Published', count: labResults.filter((r) => r.status === 'PUBLISHED').length },
+    { key: 'DOCTOR_REVIEW', label: 'Doctor Review', count: labResults.filter((r) => r.status === 'DOCTOR_REVIEW').length },
+    { key: 'AI_DRAFT', label: 'AI Draft', count: labResults.filter((r) => r.status === 'AI_DRAFT').length },
+    { key: 'PENDING', label: 'Pending', count: labResults.filter((r) => r.status === 'PENDING').length },
+  ]
+  const patientId = selectedPatient?.patient_id || selectedPatient?.id || ''
+  const doctorId = user?.id || user?.sub || selectedPatient?.doctor_id || ''
+  const cardiologyData = selectedPatient?.specialtyResults?.cardiology
+    || selectedPatient?.specialty_results?.cardiology
+    || PATIENT_SPECIALTY_RESULTS['PT-2024-0142'].cardiology
+  const isLungSoundOrder = (order) => /lung sound|respiratory sound/i.test(order?.test_name || '')
+  const isHeartSoundOrder = (order) => /heart sound|cardiac auscultation/i.test(order?.test_name || '')
+  const awaitingLungSoundOrder = awaitingUploadOrders.find(isLungSoundOrder)
+  const awaitingHeartSoundOrder = awaitingUploadOrders.find(isHeartSoundOrder)
 
   return (
     <main className="flex-1 overflow-y-auto bg-[#f8fafc] dark:bg-[#08080f] scrollbar-hide">
@@ -188,6 +432,13 @@ export default function ClinicalActivityCenter({
                           )}
                         </p>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => printExistingOrders([order])}
+                        className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-[10px] font-bold text-slate-500 transition-colors hover:border-indigo-200 hover:bg-indigo-50 hover:text-indigo-700 dark:border-[#252530] dark:text-[#70708a] dark:hover:border-indigo-800/50 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-300"
+                      >
+                        Print
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -259,22 +510,17 @@ export default function ClinicalActivityCenter({
 
             {/* Status filter pills */}
             <div className="flex flex-wrap gap-2">
-              {['ALL', 'PUBLISHED', 'DOCTOR_REVIEW', 'AI_DRAFT', 'PENDING'].map((s) => {
-                const resultOrderIds = new Set(labResults.map((r) => r.order_id))
-                const unmatchedCount = labOrders.filter((o) => !resultOrderIds.has(o.id)).length
-                const count = s === 'ALL'
-                  ? labResults.length + unmatchedCount
-                  : labResults.filter((r) => r.status === s).length
-                const active = resultsSubTab === s
+              {resultFilterTabs.map((tab) => {
+                const active = resultsSubTab === tab.key
                 return (
                   <button
-                    key={s}
-                    onClick={() => setResultsSubTab(s)}
+                    key={tab.key}
+                    onClick={() => setResultsSubTab(tab.key)}
                     className={`shrink-0 rounded-xl px-4 py-2 text-[11px] font-bold transition-all ${
                       active ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-[#252530] dark:bg-[#111118] dark:text-[#70708a]'
                     }`}
                   >
-                    {s === 'ALL' ? 'All' : s.replace(/_/g, ' ')} ({count})
+                    {tab.label} ({tab.count})
                   </button>
                 )
               })}
@@ -286,6 +532,73 @@ export default function ClinicalActivityCenter({
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
               </div>
             ) : (() => {
+              if (resultsSubTab === 'AWAITING_UPLOAD') {
+                if (awaitingUploadOrders.length === 0) {
+                  return (
+                    <div className="rounded-3xl border border-slate-200/60 bg-white p-8 text-center shadow-sm dark:border-[#252530]/60 dark:bg-[#111118]">
+                      <p className="text-sm text-slate-400 italic">No lab orders are awaiting upload.</p>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="space-y-3">
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => printExistingOrders(awaitingUploadOrders)}
+                        className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/50 dark:bg-indigo-950/30 dark:text-indigo-300"
+                      >
+                        Print All Awaiting Upload
+                      </button>
+                    </div>
+                    {awaitingUploadOrders.map((order) => (
+                      <div key={order.id} className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 dark:border-[#252530] dark:bg-[#111118]">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <p className="truncate text-sm font-bold text-slate-800 dark:text-[#eeeef5]">{order.test_name || 'Lab Order'}</p>
+                            <p className="text-xs text-slate-400">
+                              {order.ordered_at ? new Date(order.ordered_at).toLocaleDateString('vi-VN') : '—'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => printExistingOrders([order])}
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 dark:border-[#252530] dark:bg-[#16161e] dark:text-[#9898b0] dark:hover:bg-[#1c1c25]"
+                            >
+                              Print Slip
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setUploadModal(order)}
+                              className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-indigo-300 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700/50 dark:bg-indigo-950/30 dark:text-indigo-400 transition-colors"
+                            >
+                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/>
+                                <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+                              </svg>
+                              Upload Result
+                            </button>
+                            <button
+                              type="button"
+                              title="Delete this order"
+                              onClick={() => setDeleteConfirm(order)}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-300 transition-colors hover:bg-rose-50 hover:text-rose-500 dark:text-[#404050] dark:hover:bg-rose-950/30 dark:hover:text-rose-400"
+                            >
+                              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
+                                <path d="M10 11v6M14 11v6" />
+                                <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )
+              }
               const filtered = resultsSubTab === 'ALL' ? labResults : labResults.filter((r) => r.status === resultsSubTab)
               if (filtered.length === 0) {
                 return (
@@ -307,7 +620,6 @@ export default function ClinicalActivityCenter({
                   {filtered.map((result) => {
                     const order = labOrders.find((o) => o.id === result.order_id) || {}
                     const category = normalizeStatus(result.status)
-                    const isRetrying = retryingId === result.id
                     const isVerifying = verifyingId === result.id
                     const isManual = result.file_type === 'manual'
                     const hasAiDraft = !!result.ai_draft_text
@@ -367,8 +679,8 @@ export default function ClinicalActivityCenter({
                               </p>
                               <p className="text-xs text-amber-700 dark:text-amber-300">
                                 {isManual
-                                  ? 'Manual entries were submitted but AI has not yet processed them. Use "Retry AI" to trigger analysis.'
-                                  : 'AI analysis did not produce a draft. Use "Retry AI" to re-run or review and publish manually.'}
+                                  ? 'Manual entries were submitted but AI has not yet processed them. Upload again to rerun with updated source data.'
+                                  : 'AI analysis did not produce a draft. Upload again to rerun with updated source data, or review and publish manually.'}
                               </p>
                             </div>
                           )
@@ -405,18 +717,14 @@ export default function ClinicalActivityCenter({
                             </button>
                           )}
 
-                          {(category === 'processing' || category === 'ready_to_verify') && (
+                          {(category === 'processing' || category === 'ready_to_verify') && result.id && (
                             <button
                               type="button"
-                              disabled={isRetrying}
-                              onClick={() => handleRetryAi(result)}
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60 transition-colors dark:border-[#252530] dark:bg-[#16161e] dark:text-[#9898b0]"
+                              onClick={() => setUploadModal({ ...order, replaceResultId: result.id })}
+                              className="inline-flex items-center gap-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-700 hover:bg-amber-100 transition-colors dark:border-amber-800/50 dark:bg-amber-950/30 dark:text-amber-400"
                             >
-                              {isRetrying
-                                ? <span className="inline-flex h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-400 border-r-transparent" />
-                                : <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-                              }
-                              {isRetrying ? 'Retrying…' : 'Retry AI'}
+                              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+                              Upload again
                             </button>
                           )}
                         </div>
@@ -429,13 +737,20 @@ export default function ClinicalActivityCenter({
 
             {/* Unmatched orders (no result yet) — needs_upload */}
             {resultsSubTab === 'ALL' && (() => {
-              const resultOrderIds = new Set(labResults.map((r) => r.order_id))
-              const unmatched = labOrders.filter((o) => !resultOrderIds.has(o.id))
-              if (unmatched.length === 0) return null
+              if (awaitingUploadOrders.length === 0) return null
               return (
                 <div className="space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#505060]">Awaiting Upload</p>
-                  {unmatched.map((order) => (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => printExistingOrders(awaitingUploadOrders)}
+                      className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-[11px] font-bold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/50 dark:bg-indigo-950/30 dark:text-indigo-300"
+                    >
+                      Print All Awaiting Upload
+                    </button>
+                  </div>
+                  {awaitingUploadOrders.map((order) => (
                     <div key={order.id} className="rounded-2xl border border-dashed border-slate-200 bg-white p-4 dark:border-[#252530] dark:bg-[#111118]">
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex-1 min-w-0">
@@ -445,6 +760,13 @@ export default function ClinicalActivityCenter({
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => printExistingOrders([order])}
+                            className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 dark:border-[#252530] dark:bg-[#16161e] dark:text-[#9898b0] dark:hover:bg-[#1c1c25]"
+                          >
+                            Print Slip
+                          </button>
                           <button
                             type="button"
                             onClick={() => setUploadModal(order)}
@@ -481,6 +803,44 @@ export default function ClinicalActivityCenter({
 
         {emrTab === 'orders' && (
           <div className="space-y-6">
+             {(awaitingLungSoundOrder || awaitingHeartSoundOrder) && (
+               <section className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-[#252530] dark:bg-[#111118]">
+                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                   <div>
+                     <h3 className="text-sm font-bold text-slate-900 dark:text-[#eeeef5]">Auscultation Result Upload</h3>
+                     <p className="mt-1 text-xs text-slate-400">Upload heart or lung sound recordings after the matching auscultation order is created.</p>
+                   </div>
+                   {awaitingLungSoundOrder && awaitingHeartSoundOrder && (
+                     <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-[#252530] dark:bg-[#16161e]">
+                       {[
+                         { key: 'lung', label: 'Lung Sounds' },
+                         { key: 'heart', label: 'Heart Sounds' },
+                       ].map((tab) => (
+                         <button
+                           key={tab.key}
+                           type="button"
+                           onClick={() => setAuscultationTab(tab.key)}
+                           className={`rounded-lg px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                             auscultationTab === tab.key
+                               ? 'bg-white text-indigo-600 shadow-sm dark:bg-[#252530] dark:text-indigo-300'
+                               : 'text-slate-500 hover:text-slate-700 dark:text-[#70708a] dark:hover:text-[#c8c8e0]'
+                           }`}
+                         >
+                           {tab.label}
+                         </button>
+                       ))}
+                     </div>
+                   )}
+                 </div>
+
+                 {awaitingLungSoundOrder && (!awaitingHeartSoundOrder || auscultationTab === 'lung') ? (
+                   <PulmonologyPanel patientId={patientId} doctorId={doctorId} />
+                 ) : (
+                   <CardiologyPanel data={cardiologyData} patientId={patientId} doctorId={doctorId} />
+                 )}
+               </section>
+             )}
+
              {/* Order Wizard content extracted from EMRWorkspaceView */}
              {/* Simplified for brevity in this component extraction, but preserving core flow */}
              <div className="rounded-3xl border border-slate-200 bg-white p-6 dark:border-[#252530] dark:bg-[#111118]">
@@ -637,16 +997,26 @@ export default function ClinicalActivityCenter({
                               <div className="grid gap-2">
                                  {LAB_TESTS.filter(t => group.testIds.includes(t.id)).map(test => {
                                     const selected = orderedTests.includes(test.id)
+                                    const alreadyOrdered = alreadyOrderedTestIdSet.has(test.id)
                                     return (
                                        <button
                                           key={test.id}
-                                          onClick={() => toggleTest(test.id)}
+                                          onClick={() => !alreadyOrdered && toggleTest(test.id)}
+                                          disabled={alreadyOrdered}
                                           className={`flex items-center justify-between rounded-xl border p-3 text-left transition-all ${
-                                             selected ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40' : 'border-slate-100 hover:border-slate-200 dark:border-[#252530]'
+                                             selected
+                                               ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40'
+                                               : alreadyOrdered
+                                                 ? 'cursor-not-allowed border-slate-100 bg-slate-50 opacity-60 dark:border-[#252530] dark:bg-[#15151d]'
+                                                 : 'border-slate-100 hover:border-slate-200 dark:border-[#252530]'
                                           }`}
                                        >
-                                          <span className={`text-xs font-bold ${selected ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-700 dark:text-[#c8c8e0]'}`}>{test.name}</span>
-                                          {selected && (
+                                          <span className={`text-xs font-bold ${selected ? 'text-indigo-700 dark:text-indigo-300' : alreadyOrdered ? 'text-slate-400 dark:text-[#606070]' : 'text-slate-700 dark:text-[#c8c8e0]'}`}>{test.name}</span>
+                                          {alreadyOrdered ? (
+                                            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-400 dark:bg-[#20202a] dark:text-[#70708a]">
+                                              Ordered
+                                            </span>
+                                          ) : selected && (
                                             <span className="flex h-4 w-4 shrink-0 items-center justify-center text-indigo-600 dark:text-indigo-400">
                                               <CheckIcon />
                                             </span>
@@ -735,12 +1105,32 @@ export default function ClinicalActivityCenter({
                       Your lab orders have been sent to the laboratory system.<br />
                       The patient will be notified to proceed with sample collection.
                     </p>
-                    <button
-                      onClick={() => setOrderStep('details')}
-                      className="mt-8 rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-bold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
-                    >
-                      Create Another Order
-                    </button>
+                    <div className="mt-8 flex flex-wrap justify-center gap-3">
+                      {orderedTests.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handlePrintSlips(orderedTests)}
+                            className="rounded-xl border border-indigo-200 bg-indigo-50 px-5 py-2.5 text-sm font-bold text-indigo-700 transition-colors hover:bg-indigo-100 dark:border-indigo-800/50 dark:bg-indigo-950/40 dark:text-indigo-300"
+                          >
+                            Print All Slips
+                          </button>
+                          <button
+                            type="button"
+                            onClick={openPrintSlip}
+                            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#252530] dark:bg-[#16161e] dark:text-[#c8c8e0]"
+                          >
+                            Choose Tests to Print
+                          </button>
+                        </>
+                      )}
+                      <button
+                        onClick={() => setOrderStep('details')}
+                        className="rounded-xl bg-slate-900 px-6 py-2.5 text-sm font-bold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-500"
+                      >
+                        Create Another Order
+                      </button>
+                    </div>
                   </div>
                 )}
              </div>
@@ -753,6 +1143,7 @@ export default function ClinicalActivityCenter({
       {uploadModal && (
         <UploadModal
           order={uploadModal}
+          resultId={uploadModal.replaceResultId || null}
           onClose={() => setUploadModal(null)}
           onSuccess={handleUploadSuccess}
         />
@@ -771,6 +1162,84 @@ export default function ClinicalActivityCenter({
           patientName={patientName || 'Patient'}
           onClose={() => setHolisticOpen(false)}
         />
+      )}
+
+      {printSlipOpen && createPortal(
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-[#252530] dark:bg-[#111118]">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-[#eeeef5]">Print Lab Order Slip</h2>
+                <p className="mt-1 text-xs text-slate-500 dark:text-[#70708a]">Select tests to include in the printed slip.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPrintSlipOpen(false)}
+                className="rounded-lg px-2 py-1 text-sm font-bold text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-[#1c1c25]"
+                aria-label="Close print slip dialog"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {orderedTests.map((testId) => {
+                const test = LAB_TESTS.find((item) => item.id === testId)
+                if (!test) return null
+                const checked = printSlipTestIds.includes(testId)
+                return (
+                  <label
+                    key={testId}
+                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${
+                      checked
+                        ? 'border-indigo-300 bg-indigo-50 dark:border-indigo-800/50 dark:bg-indigo-950/30'
+                        : 'border-slate-200 bg-white hover:bg-slate-50 dark:border-[#252530] dark:bg-[#16161e] dark:hover:bg-[#1c1c25]'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => togglePrintSlipTest(testId)}
+                      className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600"
+                    />
+                    <span className="min-w-0 flex-1 text-left">
+                      <span className="block text-sm font-bold text-slate-800 dark:text-[#eeeef5]">{test.name}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500 dark:text-[#70708a]">{test.desc || test.tat}</span>
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+
+            <div className="mt-5 flex flex-wrap justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setPrintSlipTestIds(orderedTests)}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#1c1c25]"
+              >
+                Select All
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPrintSlipOpen(false)}
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 dark:border-[#252530] dark:text-[#9898b0] dark:hover:bg-[#1c1c25]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={printSlipTestIds.length === 0}
+                  onClick={() => handlePrintSlips()}
+                  className="rounded-xl bg-indigo-600 px-5 py-2 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Print Selected
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {deleteConfirm && createPortal(
@@ -829,6 +1298,7 @@ ClinicalActivityCenter.propTypes = {
   setResultsSubTab: PropTypes.func,
   apptId: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
   patientName: PropTypes.string,
+  user: PropTypes.object,
   onLabResultUpdate: PropTypes.func,
   onNotify: PropTypes.func,
   orderStep: PropTypes.string,
@@ -838,6 +1308,7 @@ ClinicalActivityCenter.propTypes = {
   orderNote: PropTypes.string,
   setOrderNote: PropTypes.func,
   orderedTests: PropTypes.array,
+  alreadyOrderedTestIds: PropTypes.array,
   toggleTest: PropTypes.func,
   customTests: PropTypes.array,
   addCustomTest: PropTypes.func,
